@@ -214,10 +214,10 @@ spec:
       port: 3000
       targetPort: http
 ---
-# Renamed from the old claude-workstation Ingress as part of the Berth
-# rebrand: name, host and TLS secret all changed, so this issues a fresh
-# cert-manager certificate and needs its own DNS record -- it is not a
-# no-op cutover the way the dashboard/workspace split was.
+# The single public entry point: one host, one cert, everything (dashboard API,
+# /tty, /codex, /config-tty) behind the authz-proxy middleware. cert-manager
+# issues the certificate for `berth.kieffer.me`, so that name needs a DNS
+# record pointing at the ingress controller before this is applied.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:

@@ -4,20 +4,20 @@ const cfg = require('./config');
 const { slug } = require('./naming');
 
 const LABEL = {
-    workspaceKey: 'claude.kieffer.me/workspace-key',
-    repo: 'claude.kieffer.me/repo',
-    branch: 'claude.kieffer.me/branch',
+    workspaceKey: 'berth.kieffer.me/workspace-key',
+    repo: 'berth.kieffer.me/repo',
+    branch: 'berth.kieffer.me/branch',
 };
 
 const ANN = {
-    repoUrl: 'claude.kieffer.me/repo-url',
-    repoFullName: 'claude.kieffer.me/repo-full-name',
-    branch: 'claude.kieffer.me/branch',
-    baseBranch: 'claude.kieffer.me/base-branch',
-    keyRaw: 'claude.kieffer.me/workspace-key-raw',
-    sessionName: 'claude.kieffer.me/session-name',
-    startedAt: 'claude.kieffer.me/started-at',
-    resourceProfile: 'claude.kieffer.me/resource-profile',
+    repoUrl: 'berth.kieffer.me/repo-url',
+    repoFullName: 'berth.kieffer.me/repo-full-name',
+    branch: 'berth.kieffer.me/branch',
+    baseBranch: 'berth.kieffer.me/base-branch',
+    keyRaw: 'berth.kieffer.me/workspace-key-raw',
+    sessionName: 'berth.kieffer.me/session-name',
+    startedAt: 'berth.kieffer.me/started-at',
+    resourceProfile: 'berth.kieffer.me/resource-profile',
 };
 
 /**

@@ -5,20 +5,22 @@ Kubernetes. A small dashboard app manages **one pod per workspace**: pick a
 repo and branch, get a web terminal with Claude Remote and a Codex UI attached,
 a per-repo persistent volume, and a scratch Postgres.
 
-**Berth** is the product's name — the dashboard's title, header and the
-marketing page at `/welcome` (`dashboard/public/landing.html` +
-`styles/landing.css`) — and, as of the rebrand, its Kubernetes object names,
-registry image paths and `docker-push.sh`/`.k8s-build.yaml` conventions too:
-`claude-workstation` → `berth`, `claude-dashboard` → `berth-dashboard`,
-`claude-workspace` → `berth-workspace`. That rename touches live-cluster
-identity (Deployment/Service/Ingress names, the label selector workspace pods
-are found by, the image registry path), so applying these manifests over an
-existing `claude-*`-named deployment orphans it rather than upgrading it in
-place — see [Kubernetes](#kubernetes) and the label discussion under
-[Storage](#storage). The one place the old name is still correct to use is
-migrating off the *pre-split* single-pod deployment described in `README.md`,
-whose literal Deployment name (`claude-workstation`, from
-`k8s/legacy-claude-pod.yaml`) predates both this split and the Berth name.
+**Berth** is the product's name, and it is the *only* name it goes by:
+the dashboard's title, header and the marketing page at `/welcome`
+(`dashboard/public/landing.html` + `styles/landing.css`), the Kubernetes
+object names (`berth`, `berth-dashboard`, `berth-workspace`), the workspace
+pod label, the registry image paths, the `berth.kieffer.me/*` annotation keys,
+and the `berth-ws-<repo>-<hash>` names `dashboard/lib/naming.js` generates for
+every workspace Pod and PVC.
+
+The `claude-*` names that remain are **Claude Code's own config bundle**, not
+this product: `claude-config-sync`, the `claude-config-s3-rw`/`-ro` secrets,
+the `claude-config` bucket, `~/.claude`. Those belong to the thing being
+synced and must not be rebranded. Nothing else in the repo should say
+`claude-workstation`, `claude-dashboard`, `claude-workspace`, `claude-ws-*` or
+`claude.kieffer.me/*` — the pre-split single-pod manifests and their migration
+steps were deleted rather than renamed, since a rename would have made them
+name an object that never existed.
 
 ## Architecture
 
@@ -491,7 +493,7 @@ narrow TOCTOU window remains.)
 ## Kubernetes
 
 Pods are labelled `app=berth-workspace` and carry the repo/branch as sanitised
-label slugs plus full values in `claude.kieffer.me/*` annotations (label values
+label slugs plus full values in `berth.kieffer.me/*` annotations (label values
 cannot hold a URL or a branch with slashes). **There is no `state.json`** —
 Kubernetes is the source of truth, with a 30 s in-memory cache that is bypassed
 whenever a pod is `starting`/`terminating` or a write just happened.

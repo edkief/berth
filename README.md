@@ -148,10 +148,7 @@ kubectl auth can-i create pods -n dev \
 
 ### 5. Seed the shared Claude config
 
-Migrating from the single-pod version? Use `k8s/seed-config-job.yaml` instead —
-see *Migrating* below.
-
-Otherwise, open `/config-tty/` from the dashboard, run `claude` and log in, then:
+Open `/config-tty/` from the dashboard, run `claude` and log in, then:
 
 ```bash
 claude-config-sync push
@@ -198,55 +195,6 @@ error rather than an obvious misconfiguration.
   explicitly from the *Workspace Storage* card.
 - **`degraded`** with a `restarted N× (OOMKilled)` chip means that workspace hit
   its memory limit and restarted — on its own, without touching anything else.
-
-## Migrating from the single-pod version
-
-The old 20 Gi `claude-workspace-pvc` holds your existing checkouts and
-`~/.claude`. Nothing here deletes it. The commands below name the legacy
-Deployment `claude-workstation` because that predates this repo's current
-name and the dashboard/workspace split alike — it's the literal name of the
-object you're migrating away from, in `k8s/legacy-claude-pod.yaml`.
-
-1. **Seed S3 from the legacy volume first**, or new workspaces will start
-   unauthenticated and need an interactive `claude login`.
-
-   The legacy image has neither `rclone` nor `claude-config-sync`, so
-   `kubectl exec` into the old pod cannot do this. `k8s/seed-config-job.yaml`
-   runs the *new* dashboard image against the *old* volume instead — mounted
-   read-only, staged through an emptyDir, so nothing on it is modified and the
-   Job is safe to re-run:
-
-   ```bash
-   kubectl scale deploy/claude-workstation -n dev --replicas=0     # release the RWO volume
-   kubectl wait --for=delete pod -l app=claude-workstation -n dev --timeout=120s
-   kubectl apply -f k8s/seed-config-job.yaml
-   kubectl logs -n dev job/claude-seed-config -f
-   kubectl delete -f k8s/seed-config-job.yaml
-   ```
-
-   It copies only the portable set (settings, credentials, skills, plugins,
-   agents, commands, and a stripped `.claude.json`) — not the ~71 MB of
-   transcripts.
-
-2. Inventory uncommitted work — the new topology does not read those
-   directories:
-   ```bash
-   kubectl exec -n dev deploy/claude-workstation -- bash -lc \
-     'for d in ~/workspace/sessions/*/; do git -C "$d" status --porcelain | head -1 | sed "s|^|$d |"; done'
-   ```
-3. Build and push both images; apply the RBAC and verify it.
-4. `kubectl scale deploy/claude-workstation -n dev --replicas=0` — the cutover
-   point, instantly reversible, and required before the old PVC can be remounted.
-5. Apply `k8s/dashboard.yaml`. Its Ingress (`berth` / `berth.kieffer.me`) is a
-   new object with a different name and host than the legacy one, so
-   cert-manager issues a fresh certificate and you'll need a new DNS record —
-   point it at the ingress controller before or during this step so there's no
-   gap.
-6. Smoke-test, then soak. Only after that, delete the old Deployment, Service and
-   PVC — manually, as a deliberate separate act.
-
-To roll back at any point: re-apply `k8s/legacy-claude-pod.yaml` and scale the
-dashboard to 0. The new per-repo PVCs are independent and survive.
 
 ## Local development
 

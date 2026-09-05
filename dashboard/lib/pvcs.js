@@ -5,12 +5,12 @@ const { core, isNotFound, isAlreadyExists, TtlCache } = require('./k8s');
 const cfg = require('./config');
 
 const ANN = {
-    repoUrl: 'claude.kieffer.me/repo-url',
-    repoFullName: 'claude.kieffer.me/repo-full-name',
-    keyRaw: 'claude.kieffer.me/workspace-key-raw',
-    createdAt: 'claude.kieffer.me/created-at',
-    lastSeenAt: 'claude.kieffer.me/last-seen-at',
-    lastUsedBytes: 'claude.kieffer.me/last-used-bytes',
+    repoUrl: 'berth.kieffer.me/repo-url',
+    repoFullName: 'berth.kieffer.me/repo-full-name',
+    keyRaw: 'berth.kieffer.me/workspace-key-raw',
+    createdAt: 'berth.kieffer.me/created-at',
+    lastSeenAt: 'berth.kieffer.me/last-seen-at',
+    lastUsedBytes: 'berth.kieffer.me/last-used-bytes',
 };
 
 const pvcCache = new TtlCache(cfg.pvcCacheMs);
@@ -54,7 +54,7 @@ async function ensurePvc({ id, key, repoUrl, repoFullName }) {
             labels: {
                 app: cfg.labels.app,
                 'app.kubernetes.io/managed-by': cfg.labels.managedBy,
-                'claude.kieffer.me/workspace-key': id,
+                'berth.kieffer.me/workspace-key': id,
             },
             annotations: {
                 [ANN.repoUrl]: repoUrl,

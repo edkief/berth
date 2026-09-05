@@ -2,7 +2,7 @@
 
 const crypto = require('crypto');
 
-const PREFIX = 'claude-ws-';
+const PREFIX = 'berth-ws-';
 const MAX_NAME = 63;          // DNS-1123 label AND k8s label-value limit
 const HASH_LEN = 8;
 

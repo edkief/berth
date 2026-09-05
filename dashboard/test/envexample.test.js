@@ -92,10 +92,10 @@ test('workspace/.env.example documents every var the pod template injects', () =
     const { buildWorkspacePodManifest } = require('../lib/podTemplate');
 
     const manifest = buildWorkspacePodManifest({
-        id: 'claude-ws-x-0badf00d', key: 'github.com/e/r',
+        id: 'berth-ws-x-0badf00d', key: 'github.com/e/r',
         repoUrl: 'git@github.com:e/r.git', repoFullName: 'e/r',
         branch: 'main', baseBranch: 'main', sessionName: 'r-main',
-        pvcName: 'claude-ws-x-0badf00d',
+        pvcName: 'berth-ws-x-0badf00d',
     });
 
     const injected = manifest.spec.containers[0].env.map((e) => e.name);

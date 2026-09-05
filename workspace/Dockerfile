@@ -165,7 +165,7 @@ RUN curl -fsSL -o /tmp/rclone.zip https://downloads.rclone.org/rclone-current-li
     && rm -f /tmp/rclone.zip
 
 COPY shared/claude-config-sync/claude-config-sync /usr/local/bin/claude-config-sync
-COPY workspace/supervisord.conf /etc/supervisor/conf.d/workstation.conf
+COPY workspace/supervisord.conf /etc/supervisor/conf.d/berth.conf
 COPY workspace/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/claude-config-sync
 

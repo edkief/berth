@@ -11,21 +11,21 @@ const {
 } = require('../lib/ttyProxy');
 
 test('workspace WebSocket paths select the correct service and port', () => {
-    assert.deepEqual(matchWorkspaceUpgrade('/tty/claude-ws-demo-0badf00d/ws'), {
-        service: 'tty', id: 'claude-ws-demo-0badf00d', port: TTY_PORT,
+    assert.deepEqual(matchWorkspaceUpgrade('/tty/berth-ws-demo-0badf00d/ws'), {
+        service: 'tty', id: 'berth-ws-demo-0badf00d', port: TTY_PORT,
     });
     assert.deepEqual(
-        matchWorkspaceUpgrade('/codex/claude-ws-demo-0badf00d/codex-api/ws?token=x'),
+        matchWorkspaceUpgrade('/codex/berth-ws-demo-0badf00d/codex-api/ws?token=x'),
         {
-            service: 'codex', id: 'claude-ws-demo-0badf00d', port: CODEX_PORT,
-            healthPath: '/codex/claude-ws-demo-0badf00d/',
+            service: 'codex', id: 'berth-ws-demo-0badf00d', port: CODEX_PORT,
+            healthPath: '/codex/berth-ws-demo-0badf00d/',
         },
     );
 });
 
 test('Codex upgrades are accepted only at its prefixed RPC WebSocket path', () => {
-    assert.equal(matchWorkspaceUpgrade('/codex/claude-ws-demo-0badf00d/'), null);
-    assert.equal(matchWorkspaceUpgrade('/codex/claude-ws-demo-0badf00d/not-a-websocket'), null);
+    assert.equal(matchWorkspaceUpgrade('/codex/berth-ws-demo-0badf00d/'), null);
+    assert.equal(matchWorkspaceUpgrade('/codex/berth-ws-demo-0badf00d/not-a-websocket'), null);
 });
 
 test('browser WebSocket upgrades must be same-origin', () => {
