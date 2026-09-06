@@ -54,7 +54,7 @@ USER ubuntu
 # Keep the browser client and the app-server it drives reproducible. Put these
 # args immediately before their use so a version bump does not invalidate the
 # expensive OS, Gradle and ttyd layers above it.
-ARG CODEX_CLI_VERSION=0.151.0
+ARG CODEX_CLI_VERSION=0.153.4
 ARG CODEX_APP_VERSION=0.1.87
 # 0.1.87 was republished in place with the --base-path CLI contract. Consume
 # this arg in the install layer so builders cannot reuse the pre-republish
