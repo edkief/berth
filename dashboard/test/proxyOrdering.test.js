@@ -14,3 +14,8 @@ test('workspace proxies are registered before the JSON body parser', () => {
     assert.ok(parser > source.indexOf("app.use('/config-tty'"));
     assert.ok(parser < source.indexOf("app.get('/api/config/status'"));
 });
+
+test('terminal shell route is registered before the dashboard SPA fallback', () => {
+    const source = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+    assert.ok(source.indexOf("app.get('/terminal/:id'") < source.indexOf("app.get('*'"));
+});

@@ -89,7 +89,7 @@ test('deriveStatus: Failed phase is failed', () => {
 
 test('describePod exposes per-session terminal and Codex URLs and real limits', () => {
     const s = describePod(pod({ status: { phase: 'Running', ...ready } }));
-    assert.equal(s.terminalUrl, '/tty/berth-ws-edkief-repo-0badf00d/');
+    assert.equal(s.terminalUrl, '/terminal/berth-ws-edkief-repo-0badf00d/');
     assert.equal(s.codexUrl, '/codex/berth-ws-edkief-repo-0badf00d/');
     assert.equal(s.claudeUrl, null);
     assert.equal(s.displayName, 'repo · feature/x');

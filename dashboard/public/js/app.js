@@ -47,7 +47,7 @@ function renderSessions() {
   for (const [id, card] of state.cards) if (!current.has(id)) { card.remove(); state.cards.delete(id); }
   visible.forEach((session, index) => {
     let card = state.cards.get(session.id);
-    if (!card) { card = createSessionCard(session, { onTerminate: terminateSession, onOpenTerminal: session => openUrl(session.terminalUrl || `/tty/${encodeURIComponent(session.id)}/`), onOpenCodex: session => openUrl(session.codexUrl || `/codex/${encodeURIComponent(session.id)}/`), onOpenClaude: session => session.claudeUrl && openUrl(session.claudeUrl) }); state.cards.set(session.id, card); }
+    if (!card) { card = createSessionCard(session, { onTerminate: terminateSession, onOpenTerminal: session => openUrl(session.terminalUrl || `/terminal/${encodeURIComponent(session.id)}/`), onOpenCodex: session => openUrl(session.codexUrl || `/codex/${encodeURIComponent(session.id)}/`), onOpenClaude: session => session.claudeUrl && openUrl(session.claudeUrl) }); state.cards.set(session.id, card); }
     else updateSessionCard(card, session);
     if (list.children[index] !== card) list.insertBefore(card, list.children[index] || null);
   });
@@ -134,7 +134,7 @@ async function submitSession(body) {
     if (error.response?.status !== 409 || error.data?.error !== 'workspace_busy' || !error.data.session) throw error;
     const session = error.data.session;
     const choice = await chooseAction('Workspace already running', error.data.message, [{ key:'cancel', label:'Cancel', kind:'button--quiet' }, { key:'terminal', label:'Open terminal', kind:'button--secondary' }, { key:'codex', label:'Open Codex', kind:'button--primary' }, { key:'replace', label:'Replace', kind:'button--danger' }]);
-    if (choice === 'terminal') { openUrl(session.terminalUrl || `/tty/${encodeURIComponent(session.id)}/`); return {}; }
+    if (choice === 'terminal') { openUrl(session.terminalUrl || `/terminal/${encodeURIComponent(session.id)}/`); return {}; }
     if (choice === 'codex') { openUrl(session.codexUrl || `/codex/${encodeURIComponent(session.id)}/`); return {}; }
     if (choice === 'replace') return submitSession({ ...body, replace: true });
     return {};

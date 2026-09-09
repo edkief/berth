@@ -400,6 +400,16 @@ app.get('/api/disk', asyncRoute(async (req, res) => {
 
 // ------------------------------------------------------------------ static
 
+// Berth owns the terminal chrome while ttyd remains mounted at /tty/<id>/
+// inside a same-origin iframe. Validate the path here instead of letting the
+// dashboard SPA swallow malformed terminal URLs.
+app.get('/terminal/:id', (req, res) => {
+    if (!isWorkspaceId(req.params.id)) {
+        return res.status(404).type('html').send(ttyProxy.notFoundPage(req.params.id));
+    }
+    res.sendFile(path.join(__dirname, 'public', 'terminal.html'));
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/api', (req, res) => res.status(404).json({ error: 'not_found' }));
 // The landing page is a named route, not `/`: the dashboard is what people open
