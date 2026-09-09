@@ -9,6 +9,19 @@
 </head>
 <body>
   <iframe id="terminal-frame" title="Workspace terminal"></iframe>
+  <div class="terminal-controls">
+    <button class="keyboard-toggle" id="keyboard-toggle" type="button" aria-controls="keyboard-drawer" aria-expanded="false">
+      <span aria-hidden="true">⌨</span> Keys
+    </button>
+    <aside class="keyboard-drawer" id="keyboard-drawer" aria-label="Terminal shortcut keys" aria-hidden="true" inert>
+      <header class="keyboard-drawer__header">
+        <div><strong>Terminal keys</strong><span id="keyboard-status" aria-live="polite">Connecting…</span></div>
+        <button class="keyboard-close" id="keyboard-close" type="button" aria-label="Close terminal keys">×</button>
+      </header>
+      <div class="key-layout key-layout--main" id="key-layout-main" aria-label="Terminal navigation keys"></div>
+      <div class="key-layout key-layout--function" id="key-layout-function" aria-label="Terminal function keys" hidden></div>
+    </aside>
+  </div>
   <script type="module" src="/js/terminal-shortcuts.mjs"></script>
 </body>
 </html>

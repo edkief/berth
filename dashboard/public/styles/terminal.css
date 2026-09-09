@@ -1,4 +1,53 @@
 :root { color-scheme: dark; background: #000; }
 * { box-sizing: border-box; }
 html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: #000; }
+button { font: inherit; }
+[hidden] { display: none !important; }
 #terminal-frame { display: block; width: 100%; height: 100dvh; border: 0; background: #000; }
+
+.terminal-controls { display: none; color: #e8f0ef; font: 500 14px/1.2 system-ui, sans-serif; }
+.keyboard-toggle {
+  position: fixed; z-index: 10; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom));
+  min-height: 44px; padding: 0 16px; border: 1px solid #426066; border-radius: 5px;
+  color: #e8f0ef; background: rgba(16, 27, 29, .96); box-shadow: 0 8px 24px rgba(0, 0, 0, .45);
+}
+.keyboard-toggle span { margin-right: 5px; }
+.keyboard-drawer {
+  position: fixed; z-index: 11; right: 0; bottom: 0; left: 0;
+  padding: 12px max(12px, env(safe-area-inset-right)) calc(12px + env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+  border-top: 1px solid #33494d; background: rgba(11, 19, 21, .98);
+  box-shadow: 0 -12px 36px rgba(0, 0, 0, .55); transform: translateY(105%);
+  transition: transform 160ms ease-out;
+}
+.keyboard-drawer.is-open { transform: translateY(0); }
+.keyboard-drawer__header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.keyboard-drawer__header div { display: flex; align-items: baseline; gap: 10px; }
+.keyboard-drawer__header strong { font-size: 13px; letter-spacing: .04em; }
+#keyboard-status { color: #8aa0a0; font-size: 11px; }
+.keyboard-close {
+  width: 44px; height: 44px; border: 0; color: #c0d0cf; background: transparent; font-size: 25px;
+}
+.key-layout { display: grid; grid-template-columns: repeat(6, minmax(44px, 1fr)); gap: 7px; }
+.key-layout--function { grid-template-columns: repeat(6, minmax(44px, 1fr)); }
+.terminal-key {
+  min-width: 0; min-height: 44px; padding: 7px 4px; border: 1px solid #33494d; border-radius: 4px;
+  color: #e8f0ef; background: #17272a; font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  touch-action: manipulation; user-select: none; -webkit-user-select: none;
+}
+.terminal-key:active, .terminal-key.is-active { border-color: #35d394; color: #071612; background: #35d394; }
+.terminal-key:disabled { opacity: .45; }
+.terminal-key--layout { border-color: #49767d; color: #8ee7f5; }
+.terminal-key--wide { grid-column: span 2; }
+button:focus-visible { outline: 2px solid #35d394; outline-offset: 2px; }
+
+@media (max-width: 900px), (pointer: coarse) {
+  .terminal-controls { display: block; }
+}
+
+@media (max-width: 430px) {
+  .key-layout, .key-layout--function { grid-template-columns: repeat(4, minmax(44px, 1fr)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .keyboard-drawer { transition: none; }
+}
