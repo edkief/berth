@@ -134,11 +134,17 @@ function connectToTerminal(attempt = 0) {
 
 // The layout viewport does not shrink when a mobile keyboard opens, so a page
 // sized to it puts the drawer (and the terminal's last lines) behind the keys.
-function trackViewportHeight() {
+// Only the keyboard is measured: browser chrome is already inside 100dvh, and
+// subtracting that too would push the drawer off the bottom of the screen.
+const KEYBOARD_MIN_HEIGHT = 150;
+
+function trackKeyboardInset() {
   const viewport = window.visualViewport;
   if (!viewport) return;
   const sync = () => {
-    document.documentElement.style.setProperty('--app-height', `${Math.round(viewport.height)}px`);
+    const inset = window.innerHeight - viewport.height - viewport.offsetTop;
+    document.documentElement.style.setProperty(
+      '--keyboard-inset', inset > KEYBOARD_MIN_HEIGHT ? `${Math.round(inset)}px` : '0px');
   };
   viewport.addEventListener('resize', sync);
   viewport.addEventListener('scroll', sync);
@@ -147,7 +153,7 @@ function trackViewportHeight() {
 
 renderKeys(mainLayout, MAIN_KEYS);
 renderKeys(functionLayout, FUNCTION_KEYS);
-trackViewportHeight();
+trackKeyboardInset();
 toggle.addEventListener('click', () => setDrawer(true));
 close.addEventListener('click', () => setDrawer(false));
 document.addEventListener('keydown', event => {

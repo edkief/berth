@@ -535,9 +535,12 @@ ingress auth middleware.
   xterm's hidden textarea is what makes Android raise the soft keyboard, so
   opening the drawer or tapping a key only restores focus the iframe already
   had (`refocusTerminal()`); `term.input()` needs no focus. The drawer is a flow
-  sibling of the iframe rather than a fixed overlay, and the page is sized to
-  `visualViewport` (`--app-height`), so both the keys and the terminal's last
-  lines stay above a soft keyboard instead of behind it.
+  sibling of the iframe rather than a fixed overlay, and the page is `100dvh`
+  minus a measured soft-keyboard inset (`--keyboard-inset`), so both the keys
+  and the terminal's last lines stay above the keyboard instead of behind it.
+  Never size the body to `visualViewport.height` directly: on Android Chrome
+  that is the large viewport with the toolbar retracted, so the whole drawer
+  lands below the fold and the panel opens invisible.
 - The dashboard runs **1 replica**: the TTL and proxy-target caches are
   in-process.
 - Pin `WORKSPACE_IMAGE` to an immutable tag once the image settles; with

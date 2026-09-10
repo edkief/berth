@@ -2,10 +2,12 @@
 * { box-sizing: border-box; }
 html { width: 100%; height: 100%; }
 body {
-  /* --app-height tracks visualViewport, so an Android soft keyboard shrinks the
-     page instead of drawing over the drawer. 100dvh is the no-JS fallback. */
+  /* 100dvh, never visualViewport.height: on Android Chrome that height is the
+     large viewport (toolbar retracted), so a body sized to it puts the drawer
+     below the fold. --keyboard-inset is added back only for a soft keyboard. */
   position: relative; display: flex; flex-direction: column;
-  width: 100%; height: var(--app-height, 100dvh); margin: 0; overflow: hidden; background: #000;
+  width: 100%; height: 100%; height: calc(100dvh - var(--keyboard-inset, 0px));
+  margin: 0; overflow: hidden; background: #000;
 }
 button { font: inherit; }
 [hidden] { display: none !important; }
