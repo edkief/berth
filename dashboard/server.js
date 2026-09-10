@@ -402,20 +402,29 @@ app.get('/api/disk', asyncRoute(async (req, res) => {
 
 // Berth owns the terminal chrome while ttyd remains mounted at /tty/<id>/
 // inside a same-origin iframe. Validate the path here instead of letting the
-// dashboard SPA swallow malformed terminal URLs.
+// dashboard SPA swallow malformed terminal URLs. `config` is the shared-config
+// shell at /config-tty/: it is a terminal too, so it gets the same chrome
+// rather than a raw ttyd with no way to type Esc or Ctrl on a phone.
 app.get('/terminal/:id', (req, res) => {
-    if (!isWorkspaceId(req.params.id)) {
+    if (req.params.id !== 'config' && !isWorkspaceId(req.params.id)) {
         return res.status(404).type('html').send(ttyProxy.notFoundPage(req.params.id));
     }
-    res.sendFile(path.join(__dirname, 'public', 'terminal.html'));
+    res.set('Cache-Control', 'no-cache').sendFile(path.join(__dirname, 'public', 'terminal.html'));
 });
 
-app.use(express.static(path.join(__dirname, 'public')));
+// These assets carry no version in their URL, and a CDN sits in front of the
+// origin. Without an explicit header, both it and the browser fall back to
+// heuristic caching and can serve a stylesheet from before the last deploy
+// against freshly deployed markup. `no-cache` still revalidates via ETag, so
+// an unchanged asset costs a 304, not a re-download.
+app.use(express.static(path.join(__dirname, 'public'), {
+    setHeaders: (res) => res.setHeader('Cache-Control', 'no-cache'),
+}));
 app.use('/api', (req, res) => res.status(404).json({ error: 'not_found' }));
 // The landing page is a named route, not `/`: the dashboard is what people open
 // every day, and putting a marketing page in front of it costs a click a visit.
-app.get('/welcome', (req, res) => res.sendFile(path.join(__dirname, 'public', 'landing.html')));
-app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
+app.get('/welcome', (req, res) => res.set('Cache-Control', 'no-cache').sendFile(path.join(__dirname, 'public', 'landing.html')));
+app.get('*', (req, res) => res.set('Cache-Control', 'no-cache').sendFile(path.join(__dirname, 'public', 'index.html')));
 
 app.use((err, req, res, next) => {          // eslint-disable-line no-unused-vars
     const code = k8s.statusCode(err);

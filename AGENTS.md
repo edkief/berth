@@ -363,7 +363,9 @@ which Garage supports.
 
 The **config shell** runs inside the dashboard pod (`/config-tty/`, a localhost
 hop, so it opens instantly) with its own 1 Gi PVC as the working copy. S3 is the
-distribution artifact.
+distribution artifact. The UI links it as `/terminal/config/`, not the raw
+`/config-tty/`: it is a terminal like any other, and going straight to ttyd
+leaves a phone with no way to type Esc, Ctrl or a function key.
 
 ### The shared login: watchdog, and keeping it fresh
 
@@ -489,7 +491,7 @@ narrow TOCTOU window remains.)
 | `GET` | `/api/config/status` · `POST /api/config/push` | Config sync |
 | `GET` | `/api/config/token` | Watchdog verdict + auto-refresh state; `?fresh=1` re-checks now |
 | `POST` | `/api/config/token/refresh` | Run a maintenance pass now; `?force=1` renews even when not due |
-| `GET` | `/terminal/:id/` | User-facing ttyd wrapper with mobile shortcut and function-key drawer |
+| `GET` | `/terminal/:id/` | User-facing ttyd wrapper with mobile shortcut and function-key drawer; `:id` is a workspace or `config` for the shared-config shell |
 | `ALL` | `/tty/:id/*`, `/codex/:id/*`, `/config-tty/*` | Proxied (incl. WebSocket upgrade) |
 | `GET` | `/welcome` | The Berth landing page (`landing.html`); everything else falls through to the dashboard SPA |
 

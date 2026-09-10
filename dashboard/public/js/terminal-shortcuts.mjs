@@ -1,6 +1,10 @@
 import { FUNCTION_KEYS, MAIN_KEYS, keySequence } from './terminal-keys.mjs';
 
-const match = /^\/terminal\/(berth-ws-[a-z0-9-]+-[0-9a-f]{8})\/?$/.exec(window.location.pathname);
+// `config` is the shared-config shell, which ttyd serves at its own base path.
+const match = /^\/terminal\/(config|berth-ws-[a-z0-9-]+-[0-9a-f]{8})\/?$/.exec(window.location.pathname);
+const frameSrc = match && (match[1] === 'config'
+  ? '/config-tty/'
+  : `/tty/${encodeURIComponent(match[1])}/`);
 const frame = document.getElementById('terminal-frame');
 const drawer = document.getElementById('keyboard-drawer');
 const toggle = document.getElementById('keyboard-toggle');
@@ -21,6 +25,10 @@ function refocusTerminal() {
 
 function setDrawer(open) {
   drawer.hidden = !open;
+  // Belt and braces for a cached stylesheet: the drawer used to be a fixed
+  // overlay revealed by .is-open, so a stale terminal.css served against this
+  // script would otherwise leave the panel parked off-screen.
+  drawer.classList.toggle('is-open', open);
   drawer.setAttribute('aria-hidden', String(!open));
   drawer.inert = !open;
   toggle.hidden = open;
@@ -171,7 +179,8 @@ frame.addEventListener('load', () => {
 });
 
 if (match) {
-  frame.src = `/tty/${encodeURIComponent(match[1])}/`;
+  if (match[1] === 'config') document.title = 'Berth config shell';
+  frame.src = frameSrc;
 } else {
   frame.replaceWith(Object.assign(document.createElement('p'), { textContent: 'Invalid terminal URL.' }));
 }
