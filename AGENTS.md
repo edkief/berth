@@ -531,6 +531,13 @@ ingress auth middleware.
   add prefix-stripping without also rewriting the response body. The
   user-facing `/terminal/<id>/` page embeds this raw endpoint same-origin so it
   can add mobile keys without forking or rewriting ttyd.
+- **The key drawer never focuses the terminal, and never overlays it.** Focusing
+  xterm's hidden textarea is what makes Android raise the soft keyboard, so
+  opening the drawer or tapping a key only restores focus the iframe already
+  had (`refocusTerminal()`); `term.input()` needs no focus. The drawer is a flow
+  sibling of the iframe rather than a fixed overlay, and the page is sized to
+  `visualViewport` (`--app-height`), so both the keys and the terminal's last
+  lines stay above a soft keyboard instead of behind it.
 - The dashboard runs **1 replica**: the TTL and proxy-target caches are
   in-process.
 - Pin `WORKSPACE_IMAGE` to an immutable tag once the image settles; with

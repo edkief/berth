@@ -1,19 +1,21 @@
+// `area` places the key in `.key-layout--main`'s grid, so the four arrows read
+// as the inverted T every physical keyboard has instead of wrapping across rows.
 export const MAIN_KEYS = [
-  { key: 'Escape', label: 'Esc' },
-  { key: 'Tab', label: 'Tab' },
-  { action: 'modifier', key: 'Control', label: 'Ctrl' },
-  { action: 'modifier', key: 'Alt', label: 'Alt' },
-  { key: '/', label: '/' },
-  { action: 'layout', key: 'function', label: 'FN' },
-  { key: 'Home', label: 'Home' },
-  { key: 'ArrowUp', label: '↑', ariaLabel: 'Up arrow' },
-  { key: 'End', label: 'End' },
-  { key: 'PageUp', label: 'PgUp' },
-  { key: 'ArrowLeft', label: '←', ariaLabel: 'Left arrow' },
-  { key: 'ArrowDown', label: '↓', ariaLabel: 'Down arrow' },
-  { key: 'ArrowRight', label: '→', ariaLabel: 'Right arrow' },
-  { key: 'PageDown', label: 'PgDn' },
-  { key: 'Interrupt', label: 'Ctrl+C', wide: true },
+  { key: 'Escape', label: 'Esc', area: 'esc' },
+  { key: 'Tab', label: 'Tab', area: 'tab' },
+  { action: 'modifier', key: 'Control', label: 'Ctrl', area: 'ctrl' },
+  { key: 'ArrowUp', label: '↑', ariaLabel: 'Up arrow', area: 'up' },
+  { action: 'modifier', key: 'Alt', label: 'Alt', area: 'alt' },
+  { key: '/', label: '/', area: 'slash' },
+  { action: 'layout', key: 'function', label: 'FN', area: 'fn' },
+  { key: 'ArrowLeft', label: '←', ariaLabel: 'Left arrow', area: 'left' },
+  { key: 'ArrowDown', label: '↓', ariaLabel: 'Down arrow', area: 'down' },
+  { key: 'ArrowRight', label: '→', ariaLabel: 'Right arrow', area: 'right' },
+  { key: 'Home', label: 'Home', area: 'home' },
+  { key: 'End', label: 'End', area: 'end' },
+  { key: 'PageUp', label: 'PgUp', area: 'pgup' },
+  { key: 'PageDown', label: 'PgDn', area: 'pgdn' },
+  { key: 'Interrupt', label: 'Ctrl+C', area: 'interrupt' },
 ];
 
 export const FUNCTION_KEYS = [

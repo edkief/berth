@@ -43,3 +43,29 @@ test('dedicated interrupt always emits ctrl-c', () => {
     assert.equal(keys.keySequence('Interrupt'), '\x03');
     assert.equal(keys.keySequence('Interrupt', {}, { alt: true }), '\x03');
 });
+
+test('every main key is placed in the stylesheet grid, arrows as an inverted T', () => {
+    const areas = keys.MAIN_KEYS.map(item => item.area);
+    assert.ok(areas.every(Boolean), 'each main key needs a grid area');
+    assert.equal(new Set(areas).size, areas.length, 'grid areas must be unique');
+
+    const css = require('node:fs').readFileSync(
+        require('node:path').join(__dirname, '../public/styles/terminal.css'), 'utf8');
+    const template = /\.key-layout--main\s*{[^}]*grid-template-areas:\s*([^;]+);/.exec(css);
+    assert.ok(template, 'terminal.css must place the main layout');
+    const rows = template[1].trim().split('"').filter(row => row.trim()).map(row => row.trim().split(/\s+/));
+    for (const area of areas) assert.ok(rows.some(row => row.includes(area)), `${area} is unplaced`);
+
+    const columnOf = name => {
+        const row = rows.findIndex(cells => cells.includes(name));
+        return { row, column: rows[row].indexOf(name) };
+    };
+    const up = columnOf('up');
+    const down = columnOf('down');
+    assert.equal(up.column, down.column);
+    assert.equal(down.row, up.row + 1);
+    assert.equal(columnOf('left').row, down.row);
+    assert.equal(columnOf('right').row, down.row);
+    assert.equal(columnOf('left').column, down.column - 1);
+    assert.equal(columnOf('right').column, down.column + 1);
+});

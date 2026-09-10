@@ -12,14 +12,21 @@ const modifiers = { ctrl: false, alt: false };
 let term = null;
 let textarea = null;
 
+// Focusing xterm's hidden textarea summons the Android soft keyboard, which
+// would cover the drawer we just opened. Only ever restore focus that the
+// terminal already had — when the iframe is focused, activeElement is <iframe>.
+function refocusTerminal() {
+  if (document.activeElement === frame) term?.focus();
+}
+
 function setDrawer(open) {
-  drawer.classList.toggle('is-open', open);
+  drawer.hidden = !open;
   drawer.setAttribute('aria-hidden', String(!open));
   drawer.inert = !open;
-  toggle.setAttribute('aria-expanded', String(open));
   toggle.hidden = open;
-  if (open) term?.focus();
-  else toggle.focus();
+  toggle.setAttribute('aria-expanded', String(open));
+  // Reopening always lands on the main layout; FN is a momentary detour.
+  if (!open) { setLayout('main'); toggle.focus(); }
 }
 
 function setLayout(name) {
@@ -42,7 +49,7 @@ function send(key) {
   const sequence = keySequence(key, term.modes, modifiers);
   if (sequence !== null) term.input(sequence, true);
   clearModifiers();
-  term.focus();
+  refocusTerminal();
 }
 
 function toggleModifier(button) {
@@ -50,7 +57,7 @@ function toggleModifier(button) {
   modifiers[name] = !modifiers[name];
   button.classList.toggle('is-active', modifiers[name]);
   button.setAttribute('aria-pressed', String(modifiers[name]));
-  term?.focus();
+  refocusTerminal();
 }
 
 function makeButton(definition) {
@@ -59,6 +66,7 @@ function makeButton(definition) {
   button.className = `terminal-key${definition.wide ? ' terminal-key--wide' : ''}`;
   button.textContent = definition.label;
   button.disabled = definition.action !== 'layout';
+  if (definition.area) button.style.gridArea = definition.area;
   if (definition.ariaLabel) button.setAttribute('aria-label', definition.ariaLabel);
 
   if (definition.action === 'modifier') {
@@ -124,12 +132,26 @@ function connectToTerminal(attempt = 0) {
   else status.textContent = 'Shortcuts unavailable';
 }
 
+// The layout viewport does not shrink when a mobile keyboard opens, so a page
+// sized to it puts the drawer (and the terminal's last lines) behind the keys.
+function trackViewportHeight() {
+  const viewport = window.visualViewport;
+  if (!viewport) return;
+  const sync = () => {
+    document.documentElement.style.setProperty('--app-height', `${Math.round(viewport.height)}px`);
+  };
+  viewport.addEventListener('resize', sync);
+  viewport.addEventListener('scroll', sync);
+  sync();
+}
+
 renderKeys(mainLayout, MAIN_KEYS);
 renderKeys(functionLayout, FUNCTION_KEYS);
+trackViewportHeight();
 toggle.addEventListener('click', () => setDrawer(true));
 close.addEventListener('click', () => setDrawer(false));
 document.addEventListener('keydown', event => {
-  if (event.key === 'Escape' && drawer.classList.contains('is-open')) setDrawer(false);
+  if (event.key === 'Escape' && !drawer.hidden) setDrawer(false);
 });
 frame.addEventListener('load', () => {
   term = null;
