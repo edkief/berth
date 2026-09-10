@@ -32,6 +32,7 @@ Browser
 │ berth-dashboard (1 replica)               │
 │   /welcome       Berth landing page       │
 │   /api/*         session + PVC control    │──── Kubernetes API (namespaced Role)
+│   /terminal/<id> mobile terminal shell    │
 │   /tty/<id>/*    HTTP+WS reverse proxy    │────┐
 │   /codex/<id>/*  HTTP+WS reverse proxy    │────┤
 │   /config-tty/   shared-config shell      │    │
@@ -70,6 +71,7 @@ which is the reason this design replaced the previous single-pod one.
 | `dashboard/prune-pvcs.js` | PVC pruner, run by a CronJob |
 | `dashboard/public/index.html` | Single-file dashboard UI, no build step |
 | `dashboard/public/landing.html` + `styles/landing.css` | The Berth marketing page served at `/welcome` |
+| `dashboard/public/terminal.html` + `js/terminal-*.mjs` | Same-origin ttyd wrapper with mobile shortcut drawer |
 | `workspace/entrypoint.sh` | Bootstrap: secrets → config pull → clone → seed → supervisord |
 | `workspace/agent.js` | In-pod health/disk endpoint (this is why we need no `pods/exec`); also discovers the live Claude Remote URL from the pane |
 | `workspace/supervisord.conf` | Runs ttyd, `codexapp` (Codex UI), the agent and Postgres |
@@ -487,6 +489,7 @@ narrow TOCTOU window remains.)
 | `GET` | `/api/config/status` · `POST /api/config/push` | Config sync |
 | `GET` | `/api/config/token` | Watchdog verdict + auto-refresh state; `?fresh=1` re-checks now |
 | `POST` | `/api/config/token/refresh` | Run a maintenance pass now; `?force=1` renews even when not due |
+| `GET` | `/terminal/:id/` | User-facing ttyd wrapper with mobile shortcut and function-key drawer |
 | `ALL` | `/tty/:id/*`, `/codex/:id/*`, `/config-tty/*` | Proxied (incl. WebSocket upgrade) |
 | `GET` | `/welcome` | The Berth landing page (`landing.html`); everything else falls through to the dashboard SPA |
 
@@ -525,7 +528,9 @@ ingress auth middleware.
 - `MAX_WORKSPACES` (default 4) returns **429**; a `ResourceQuota` is the backstop.
 - ttyd is told its own base path (`TTY_BASE_PATH=/tty/<id>`) because it bakes
   that path into the JS it serves. The proxy therefore rewrites nothing — do not
-  add prefix-stripping without also rewriting the response body.
+  add prefix-stripping without also rewriting the response body. The
+  user-facing `/terminal/<id>/` page embeds this raw endpoint same-origin so it
+  can add mobile keys without forking or rewriting ttyd.
 - The dashboard runs **1 replica**: the TTL and proxy-target caches are
   in-process.
 - Pin `WORKSPACE_IMAGE` to an immutable tag once the image settles; with

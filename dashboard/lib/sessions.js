@@ -155,7 +155,10 @@ function describePod(pod, { agentHealth = null, warning = null } = {}) {
         startedAt: ann[ANN.startedAt] || pod.metadata?.creationTimestamp || null,
         restartCount: cs?.restartCount ?? 0,
         lastTerminationReason: cs?.lastState?.terminated?.reason || null,
-        terminalUrl: `/tty/${pod.metadata.name}/`,
+        // The Berth terminal shell adds mobile controls around the raw ttyd
+        // endpoint. Keep /tty/<id>/ private-but-reachable as the iframe and
+        // backwards-compatible direct URL.
+        terminalUrl: `/terminal/${pod.metadata.name}/`,
         codexUrl: `/codex/${pod.metadata.name}/`,
         claudeUrl: validClaudeUrl(agentHealth?.claudeUrl),
         limits: limitsFromPod(pod),

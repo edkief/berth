@@ -21,6 +21,7 @@ Browser
 │ berth-dashboard                         │
 │   /welcome      Berth landing page      │
 │   /api/*        session + storage API   │──── Kubernetes API
+│   /terminal/<id> mobile terminal shell  │
 │   /tty/<id>/*   reverse proxy (HTTP+WS) │────┐
 │   /codex/<id>/* reverse proxy (HTTP+WS) │────┤
 │   /config-tty/  shared-config shell     │    │
@@ -45,7 +46,7 @@ design.
 ├── dashboard/          # control plane + UI (slim image)
 │   ├── Dockerfile  server.js  prune-pvcs.js
 │   ├── lib/        k8s client, pod template, proxy, metrics, validation
-│   ├── public/     index.html (app) + landing.html (Berth's /welcome page)
+│   ├── public/     dashboard, landing page, and mobile terminal shell
 │   └── test/       pure-function tests (no cluster required)
 ├── workspace/          # the dev environment (fat image)
 │   ├── Dockerfile  entrypoint.sh  supervisord.conf  agent.js
