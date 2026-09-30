@@ -11,6 +11,7 @@ test('workspace proxies are registered before the JSON body parser', () => {
 
     assert.ok(parser > source.indexOf("app.use('/tty/:id'"));
     assert.ok(parser > source.indexOf("app.use('/codex/:id'"));
+    assert.ok(parser > source.indexOf("app.use('/ralph/:id'"));
     assert.ok(parser > source.indexOf("app.use('/config-tty'"));
     assert.ok(parser < source.indexOf("app.get('/api/config/status'"));
 });

@@ -141,6 +141,19 @@ function notReadyPage(id, session) {
     });
 }
 
+function ralphNotRunningPage(id) {
+    return page({
+        title: 'Ralph is not running',
+        refresh: 5,
+        body: `<h1>Ralph is not running</h1>` +
+            `<p>Start it from the <a href="/terminal/${escapeHtml(id)}/">workspace terminal</a> ` +
+            `with <code>ralph</code> (its web UI comes up with the loop) or ` +
+            `<code>ralph ui</code> to browse past runs.</p>` +
+            `<p style="opacity:.6">This page refreshes automatically.</p>` +
+            `<p><a href="/">Back to the dashboard</a></p>`,
+    });
+}
+
 function proxyRequest(req, res, target) {
     const upstream = http.request({
         host: target.ip,
@@ -211,6 +224,6 @@ function proxyUpgrade(req, socket, head, target) {
 
 module.exports = {
     resolveTarget, invalidateTarget, proxyRequest, proxyUpgrade,
-    notFoundPage, notReadyPage, targetCache, TTY_PORT, CODEX_PORT,
+    notFoundPage, notReadyPage, ralphNotRunningPage, targetCache, TTY_PORT, CODEX_PORT,
     probeHttp, isSameOriginUpgrade, matchWorkspaceUpgrade,
 };

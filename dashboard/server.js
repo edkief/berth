@@ -102,6 +102,35 @@ app.use('/codex/:id', asyncRoute(async (req, res) => {
     ttyProxy.proxyRequest(req, res, target);
 }));
 
+// Ralph's web UI is told its base path (RALPH_UI_BASE_PATH) the same way, and
+// its own URLs are relative, so nothing is rewritten here either. It is up only
+// while someone runs ralph in the terminal, so "not answering" gets a page that
+// says how to start it rather than the workspace-starting one.
+app.use('/ralph/:id', asyncRoute(async (req, res) => {
+    const { id } = req.params;
+    if (!cfg.ralph.enabled) {
+        return res.status(404).type('text').send('Ralph is not enabled (RALPH_ENABLE).');
+    }
+    if (!isWorkspaceId(id)) return res.status(404).send(ttyProxy.notFoundPage(id));
+
+    const target = await ttyProxy.resolveTarget(id, {
+        port: cfg.ralph.uiPort,
+        healthPath: `/ralph/${id}/api/status`,
+    });
+    if (target.gone) {
+        return res.status(404).type('html').send(ttyProxy.notFoundPage(id));
+    }
+    if (target.notReady && !target.pod?.status?.podIP) {
+        const session = sessions.describePod(target.pod);
+        return res.status(503).type('html').send(ttyProxy.notReadyPage(id, session));
+    }
+    if (target.notReady) {
+        return res.status(503).type('html').send(ttyProxy.ralphNotRunningPage(id));
+    }
+    req.url = req.originalUrl;
+    ttyProxy.proxyRequest(req, res, target);
+}));
+
 // ------------------------------------------------------------------- config
 
 // The config shell runs inside this pod, so it is a plain localhost hop --
