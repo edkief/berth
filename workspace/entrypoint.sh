@@ -148,6 +148,24 @@ if command -v npm >/dev/null 2>&1; then
     fi
 fi
 
+# -------------------------------------------------------------------- ralph
+# Opt-in, and from a private registry: a failure here warns and keeps whatever
+# the image shipped, never fails the bootstrap. The timeout stops an
+# unresponsive registry holding the workspace at "starting Claude…".
+ralph_version() {
+    node -p "require('$(npm root -g)/@edkief/ralph/package.json').version" 2>/dev/null
+}
+case "${RALPH_ENABLE:-}" in
+    1|true|yes|on)
+        RALPH_BEFORE="$(ralph_version || true)"
+        if timeout 120 npm install -g --fetch-retries=1 @edkief/ralph@latest >/dev/null; then
+            echo "[entrypoint] ralph $(ralph_version || echo '?') installed"
+        else
+            echo "[entrypoint] WARN: could not install @edkief/ralph@latest; keeping ${RALPH_BEFORE:-no ralph}"
+        fi
+        ;;
+esac
+
 if command -v claude >/dev/null 2>&1; then
     claude mcp get playwright >/dev/null 2>&1 \
         || claude mcp add playwright --scope user -- \

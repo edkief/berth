@@ -122,6 +122,22 @@ RUN . "$NVM_DIR/nvm.sh" \
 
 USER ubuntu
 
+# Ralph, the agent loop, from the same private registry as codexapp. Optional:
+# an unreachable registry leaves the image without it rather than failing the
+# build. The entrypoint installs the latest at boot when RALPH_ENABLE is set,
+# which is also what keeps a cached layer from pinning an old version; pass
+# RALPH_VERSION to pin one here, or to bust that cache.
+ARG RALPH_VERSION=latest
+RUN . "$NVM_DIR/nvm.sh" \
+    && { npm install -g --fetch-retries=1 "@edkief/ralph@${RALPH_VERSION}" \
+         || echo "WARN: @edkief/ralph@${RALPH_VERSION} unavailable; building without ralph"; }
+# Linked even when the install failed: it dangles until a boot install fills
+# it, and the byobu login shell has no nvm on PATH to find it otherwise.
+USER root
+RUN . "$NVM_DIR/nvm.sh" \
+    && ln -sf "$(dirname "$(which node)")/ralph" /usr/local/bin/ralph
+USER ubuntu
+
 # Agent + bootstrap scripts. No API server here any more: session management
 # lives in the dashboard image, and this pod only runs one workspace.
 COPY --chown=ubuntu:ubuntu workspace/agent.js /home/ubuntu/agent/agent.js
@@ -172,7 +188,8 @@ RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/claude-config-sync
 USER ubuntu
 WORKDIR /workspace
 
-# 7681 ttyd, 7682 agent, 7684 Codex UI (all dashboard-only), 5432 Postgres.
-EXPOSE 7681 7682 7684 5432
+# 7681 ttyd, 7682 agent, 7684 Codex UI, 4280 Ralph UI (all dashboard-only),
+# 5432 Postgres.
+EXPOSE 7681 7682 7684 4280 5432
 
 CMD ["/usr/local/bin/entrypoint.sh"]
