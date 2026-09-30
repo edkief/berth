@@ -161,8 +161,40 @@ function describePod(pod, { agentHealth = null, warning = null } = {}) {
         terminalUrl: `/terminal/${pod.metadata.name}/`,
         codexUrl: `/codex/${pod.metadata.name}/`,
         claudeUrl: validClaudeUrl(agentHealth?.claudeUrl),
+        ralphUrl: ralphAvailable(pod) ? `/ralph/${pod.metadata.name}/` : null,
+        ralph: ralphAvailable(pod) ? ralphState(agentHealth) : null,
         limits: limitsFromPod(pod),
         resourceProfile: ann[ANN.resourceProfile] || null,
+    };
+}
+
+/**
+ * Ralph is opt-in per dashboard, and a pod started before it was turned on has
+ * no port for it -- so both have to agree before the card offers it.
+ */
+function ralphAvailable(pod) {
+    return cfg.ralph.enabled && (pod.spec?.containers?.[0]?.ports || [])
+        .some((p) => p.name === 'ralph-ui');
+}
+
+/**
+ * The agent's view of Ralph, reduced to what the card shows. `ui` is the only
+ * thing that enables the button; the rest is its tooltip.
+ */
+function ralphState(agentHealth) {
+    const r = agentHealth?.ralph;
+    if (!r) {
+        return {
+            ui: false,
+            reason: agentHealth ? 'the workspace agent does not report Ralph (image too old?)'
+                : 'workspace agent unreachable',
+        };
+    }
+    return {
+        ui: r.ui === true,
+        reason: typeof r.reason === 'string' ? r.reason : null,
+        tasks: r.tasks || null,
+        run: r.run || null,
     };
 }
 

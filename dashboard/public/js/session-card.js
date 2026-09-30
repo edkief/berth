@@ -15,7 +15,17 @@ function summary(health) {
 
 function statusClass(status) { return `status status--${String(status || 'unknown').replace(/[^a-z-]/g, '')}`; }
 
-export function createSessionCard(session, { onTerminate, onOpenTerminal, onOpenCodex, onOpenClaude }) {
+/** Tooltip for the Ralph button: why it is off, or where the latest run stands. */
+function ralphTitle(ralph) {
+  if (!ralph?.ui) return `Ralph ${ralph?.reason || 'is not running'} — start it from the terminal with \`ralph\``;
+  const run = ralph.run;
+  const tasks = ralph.tasks?.total != null ? `${ralph.tasks.passed}/${ralph.tasks.total} tasks` : null;
+  if (!run) return ['Ralph web UI', tasks].filter(Boolean).join(' · ');
+  const iteration = run.iteration != null ? `iteration ${run.iteration}${run.maxIterations ? `/${run.maxIterations}` : ''}` : null;
+  return [`Ralph ${run.live ? 'running' : run.status || 'idle'}`, run.live ? run.taskId : null, iteration, tasks].filter(Boolean).join(' · ');
+}
+
+export function createSessionCard(session, { onTerminate, onOpenTerminal, onOpenCodex, onOpenClaude, onOpenRalph }) {
   const card = document.createElement('article');
   card.className = 'session-card';
   card.dataset.session = session.id;
@@ -33,6 +43,7 @@ export function createSessionCard(session, { onTerminate, onOpenTerminal, onOpen
           <div class="session-actions">
             <button class="button button--primary button--small" data-action="claude">Open Claude</button>
             <button class="button button--primary button--small" data-action="codex">Open Codex</button>
+            <button class="button button--primary button--small" data-action="ralph" hidden>Open Ralph</button>
             <button class="button button--secondary button--small" data-action="terminal">Terminal</button>
             <button class="button button--danger button--small" data-action="terminate">Terminate</button>
           </div>
@@ -47,6 +58,7 @@ export function createSessionCard(session, { onTerminate, onOpenTerminal, onOpen
   const action = role => card.querySelector(`[data-action="${role}"]`);
   action('claude').addEventListener('click', () => onOpenClaude(card._session));
   action('codex').addEventListener('click', () => onOpenCodex(card._session));
+  action('ralph').addEventListener('click', () => onOpenRalph(card._session));
   action('terminal').addEventListener('click', () => onOpenTerminal(card._session));
   action('terminate').addEventListener('click', () => onTerminate(card._session));
   wirePanels(card);
@@ -75,6 +87,12 @@ export function updateSessionCard(card, session) {
   claude.title = claude.disabled
     ? session.claudeUrl ? session.message || 'Claude session is reconnecting' : 'Claude session link is still being discovered'
     : '';
+  // Ralph is started by hand, so the button follows the agent's probe of its
+  // web UI (refreshed with every sessions poll), not the workspace status.
+  const ralph = card.querySelector('[data-action="ralph"]');
+  ralph.hidden = !session.ralphUrl;
+  ralph.disabled = !session.ralph?.ui;
+  ralph.title = session.ralphUrl ? ralphTitle(session.ralph) : '';
   card.querySelector('[data-raw="health"]').href = `/api/sessions/${encodeURIComponent(session.id)}/health`;
   card.querySelector('[data-raw="logs"]').href = `/api/sessions/${encodeURIComponent(session.id)}/logs?tail=${card.querySelector('[data-lines]').value}`;
 }

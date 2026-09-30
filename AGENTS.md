@@ -35,6 +35,7 @@ Browser
 │   /terminal/<id> mobile terminal shell    │
 │   /tty/<id>/*    HTTP+WS reverse proxy    │────┐
 │   /codex/<id>/*  HTTP+WS reverse proxy    │────┤
+│   /ralph/<id>/*  HTTP proxy (opt-in)      │────┤
 │   /config-tty/   shared-config shell      │    │
 └───────────────────────────────────────────┘    │
                                                   ▼
@@ -42,6 +43,7 @@ Browser
                         │ berth-workspace pod (one per repo)     │
                         │   :7681 ttyd     → byobu → claude remote│
                         │   :7684 codexapp → codex app-server    │
+                        │   :4280 ralph UI (only while it runs)  │
                         │   :7682 agent    → /healthz /disk      │
                         │   :5432 postgres (scratch)             │
                         │   /workspace ← per-repo PVC             │
@@ -68,6 +70,7 @@ which is the reason this design replaced the previous single-pod one.
 | `dashboard/lib/metrics.js` | `metrics.k8s.io` with graceful degradation |
 | `dashboard/lib/tokenRefresh.js` | Renews the shared login and publishes it |
 | `dashboard/lib/ttyProxy.js` (`CODEX_PORT`) | Also resolves and proxies the Codex UI target |
+| `server.js` `/ralph/:id` + `agent.js` `probeRalph()` | Opt-in Ralph web UI proxy, and the probe that enables its button |
 | `dashboard/prune-pvcs.js` | PVC pruner, run by a CronJob |
 | `dashboard/public/index.html` | Single-file dashboard UI, no build step |
 | `dashboard/public/landing.html` + `styles/landing.css` | The Berth marketing page served at `/welcome` |
@@ -235,6 +238,39 @@ alternatives that were rejected, not current status).
   of Claude Remote — Codex has no headless remote-control surface to publish
   to (§1 of `docs/codex-migration.md`), so the only way into a Codex session
   is the workspace's own `/codex/<id>/` UI.
+
+## Ralph (opt-in)
+
+[Ralph](https://github.com/edkief/ralph) (`@edkief/ralph`, from the private
+`npm.kieffer.me` registry) is an agent loop driven from the terminal. It is
+off unless the dashboard has `RALPH_ENABLE=1`, and takes effect only for
+workspaces started afterwards.
+
+- **Install is best-effort, twice.** The image installs `RALPH_VERSION`
+  (default `latest`) and the entrypoint reinstalls `latest` at boot when
+  enabled. Either failing only warns: the registry is private, and an
+  unreachable one must never fail a build or a bootstrap. The boot install has
+  a timeout so a hung registry cannot hold the workspace at *starting*.
+  `/usr/local/bin/ralph` is linked even when the image install failed; it
+  dangles until a boot install fills it.
+- **Nothing starts it.** The user runs `ralph` in the terminal. The pod env
+  (`podTemplate.js` `ralphEnv()`) is read by ralph itself: `RALPH_UI=1` serves
+  the web UI beside every loop, on `0.0.0.0:$RALPH_UI_PORT` (default 4280,
+  Ralph's own) so the dashboard can reach the pod IP, under
+  `RALPH_UI_BASE_PATH=/ralph/<id>`. `ralph ui` serves it alone, for past runs.
+- **Proxy rewrites nothing**, as for ttyd and codexapp: ralph strips its base
+  path and its app's URLs are relative. A ralph without base-path support
+  serves `index.html` for every path, which would load and then call its API
+  on the dashboard's root — so the agent treats a non-JSON `/api/status` as
+  *not usable*, not as up.
+- **The button follows a probe, not the pod.** The agent GETs
+  `$RALPH_UI_BASE_PATH/api/status` on loopback every `RALPH_PROBE_MS` (5 s),
+  off the request path, and reports `ralph` in `/healthz`; the sessions list
+  re-reads `/healthz` on every poll. *Open Ralph* shows only when the dashboard
+  has it enabled **and** the pod has a `ralph-ui` port, and is enabled only
+  while the UI answers; its tooltip carries the run status or the reason.
+  Ralph never affects readiness or liveness.
+- `RALPH_UI_PORT` is also in `k8s/networkpolicy.yaml`; change both together.
 
 ## Storage
 
@@ -478,7 +514,7 @@ narrow TOCTOU window remains.)
 |---|---|---|
 | `GET` | `/api/info` | Namespace, workspace image, `metricsAvailable`, defaults |
 | `GET` | `/api/repos`, `/api/branches?repo=` | GitHub listing |
-| `GET` | `/api/sessions`, `/api/sessions/:id` | 30 s cache, skipped while anything is unsettled; each session carries `terminalUrl`, `codexUrl` and (once discovered) `claudeUrl` |
+| `GET` | `/api/sessions`, `/api/sessions/:id` | 30 s cache, skipped while anything is unsettled; each session carries `terminalUrl`, `codexUrl`, (once discovered) `claudeUrl`, and with Ralph enabled `ralphUrl` + `ralph` |
 | `POST` | `/api/sessions` | **202** / 400 / **409** / 429 |
 | `GET` · `PUT` · `DELETE` | `/api/resource-profiles/*` | Manage PVC-backed requests/limits and the startup default |
 | `DELETE` | `/api/sessions/:id` | 202; keeps the PVC unless `?deletePvc=true` |
@@ -493,6 +529,7 @@ narrow TOCTOU window remains.)
 | `POST` | `/api/config/token/refresh` | Run a maintenance pass now; `?force=1` renews even when not due |
 | `GET` | `/terminal/:id/` | User-facing ttyd wrapper with mobile shortcut and function-key drawer; `:id` is a workspace or `config` for the shared-config shell |
 | `ALL` | `/tty/:id/*`, `/codex/:id/*`, `/config-tty/*` | Proxied (incl. WebSocket upgrade) |
+| `GET` | `/ralph/:id/*` | Ralph's web UI, proxied; 404 unless `RALPH_ENABLE`, a how-to-start page while it isn't running |
 | `GET` | `/welcome` | The Berth landing page (`landing.html`); everything else falls through to the dashboard SPA |
 
 ## Kubernetes
