@@ -12,6 +12,9 @@
  *   GET /healthz  readiness: bootstrap finished AND `claude remote` is running
  *   GET /disk     df of the workspace volume
  *   GET /session  what this pod is working on
+ *
+ * With RALPH_ENABLE set, /healthz and /session also carry `ralph`: whether
+ * Ralph's web UI is answering, and where its latest run stands.
  */
 
 const http = require('http');
@@ -61,6 +64,16 @@ let tokenSyncRunning = false;
 let tokenSyncError = null;
 let lastTokenSync = { at: null, adopted: false, published: false, error: null };
 let claudeUrl = null;
+
+// Ralph is started by hand from the terminal, so nothing here supervises it:
+// the agent only watches whether its web UI answers, which is all the
+// dashboard's Open Ralph button needs. Probed on a timer rather than per
+// request, so a wedged ralph can never slow a readiness answer.
+const RALPH_ENABLED = /^(1|true|yes|on)$/i.test(process.env.RALPH_ENABLE || '');
+const RALPH_UI_PORT = Number(process.env.RALPH_UI_PORT || 4280);
+const RALPH_UI_BASE_PATH = (process.env.RALPH_UI_BASE_PATH || '').replace(/\/+$/, '');
+const RALPH_PROBE_MS = Number(process.env.RALPH_PROBE_MS || 5000);
+let ralph = { ui: false, reason: 'not checked yet', checkedAt: null };
 
 // What `claude remote` actually prints once it has registered:
 //
@@ -494,7 +507,74 @@ function session() {
         claudeConnected: health().ready,
         credentials: credentials(),
         tokenSync: lastTokenSync,
+        ...withRalph({}),
     };
+}
+
+/**
+ * Turn Ralph's `/api/status` answer into what the dashboard shows.
+ *
+ * A 200 that is not JSON is its own case, not "not running": a ralph without
+ * base-path support serves its app for every unknown path, so the probe gets
+ * index.html. Its UI would load but request its API from the dashboard's
+ * root, so the button must stay off and say why.
+ */
+function ralphFromStatus(statusCode, body) {
+    const checkedAt = new Date().toISOString();
+    if (statusCode !== 200) {
+        return { ui: false, reason: `web UI answered ${statusCode}`, checkedAt };
+    }
+    let status;
+    try { status = JSON.parse(body); } catch { status = null; }
+    if (!status || typeof status !== 'object') {
+        return {
+            ui: false,
+            reason: 'web UI does not serve its API under RALPH_UI_BASE_PATH; update ralph',
+            checkedAt,
+        };
+    }
+    const run = status.run || null;
+    return {
+        ui: true,
+        tasks: status.tasks
+            ? { passed: status.tasks.passed ?? null, total: status.tasks.total ?? null }
+            : null,
+        run: run && {
+            runId: run.runId ?? null,
+            status: run.status ?? null,
+            live: Boolean(run.live),
+            iteration: run.iteration ?? null,
+            maxIterations: run.maxIterations ?? null,
+            taskId: run.taskId ?? null,
+        },
+        checkedAt,
+    };
+}
+
+function probeRalph() {
+    const req = http.get({
+        host: '127.0.0.1',
+        port: RALPH_UI_PORT,
+        path: `${RALPH_UI_BASE_PATH}/api/status`,
+        timeout: 2000,
+    }, (res) => {
+        let body = '';
+        res.setEncoding('utf8');
+        res.on('data', (c) => { if (body.length < 1 << 20) body += c; });
+        res.on('end', () => { ralph = ralphFromStatus(res.statusCode, body); });
+    });
+    req.on('timeout', () => req.destroy(new Error('timed out')));
+    req.on('error', (err) => {
+        ralph = {
+            ui: false,
+            reason: err.code === 'ECONNREFUSED' ? 'not running' : `no answer (${err.code || err.message})`,
+            checkedAt: new Date().toISOString(),
+        };
+    });
+}
+
+function withRalph(result) {
+    return RALPH_ENABLED ? { ...result, ralph } : result;
 }
 
 function send(res, status, body) {
@@ -519,7 +599,7 @@ function startServer() {
             // Throttled and fire-and-forget: the probe answers from local state.
             maintainToken();
             const h = health();
-            return send(res, h.ready ? 200 : 503, h);
+            return send(res, h.ready ? 200 : 503, withRalph(h));
         }
 
         if (path === '/disk') {
@@ -539,6 +619,12 @@ function startServer() {
     });
 }
 
-if (require.main === module) startServer();
+if (require.main === module) {
+    startServer();
+    if (RALPH_ENABLED) {
+        probeRalph();
+        setInterval(probeRalph, RALPH_PROBE_MS);
+    }
+}
 
-module.exports = { extractClaudeUrl, startServer };
+module.exports = { extractClaudeUrl, ralphFromStatus, startServer };
