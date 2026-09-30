@@ -85,10 +85,20 @@ h3 { font-size: 16px; }
 .branch { color: var(--accent-bright); }
 .session-message { margin-top: .65rem; color: var(--muted); font-size: 13px; }
 .session-message:empty { display: none; }
-.session-side { display: flex; align-items: center; gap: .8rem; }
+.session-side { display: grid; grid-template-columns: auto 230px; align-items: center; justify-items: end; gap: .75rem .8rem; }
 .session-meters { display: flex; gap: .8rem; width: 230px; }
 .session-meters .meter { flex: 1; min-width: 0; }
-.session-actions { display: flex; align-items: center; gap: .4rem; }
+/* Actions get their own row so the title and message column keeps its width. */
+.session-actions { display: flex; grid-column: 1 / -1; align-items: center; gap: .4rem; }
+/* One joined control for the agents, so three of them read as one choice.
+   State is the dot, not the fill: a dimmed green fill read as "enabled". */
+.launch-group { display: inline-flex; overflow: hidden; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--surface); }
+.launch-group__item { display: inline-flex; flex: 1 1 auto; align-items: center; justify-content: center; gap: 7px; min-height: 30px; padding: .34rem .7rem; border: 0; color: var(--ink); background: transparent; font-size: 12px; font-weight: 600; line-height: 1; transition: background .15s, color .15s; }
+.launch-group__item + .launch-group__item { border-left: 1px solid var(--line-strong); }
+.launch-group__item::before { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); content: ""; }
+.launch-group__item:hover:not(:disabled) { color: var(--accent-bright); background: var(--tint); }
+.launch-group__item:disabled { color: var(--muted); opacity: 1; }
+.launch-group__item:disabled::before { background: transparent; box-shadow: inset 0 0 0 1px currentColor; }
 .session-diagnostics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-top: 1px solid var(--line-soft); }
 .details { min-width: 0; }
 .details + .details { border-left: 1px solid var(--line-soft); }
@@ -184,7 +194,8 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
   .header-metrics { display: none; }
   .header-nav { margin-left: auto; }
   .session-card__main { grid-template-columns: minmax(0, 1fr); }
-  .session-side { justify-content: space-between; }
+  .session-side { display: flex; flex-wrap: wrap; }
+  .session-actions { flex: 1 1 100%; }
 }
 @media (max-width: 760px) {
   #pod-name { display: none; }
@@ -207,9 +218,10 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
   .page-heading { flex-direction: column; }
   .workspace-toolbar { padding: 6px; }
   .segmented { max-width: 100%; overflow-x: auto; }
-  .session-side { align-items: start; flex-direction: column; }
+  .session-side { grid-template-columns: minmax(0, 1fr); }
   .session-meters { width: 100%; }
   .session-actions { width: 100%; flex-wrap: wrap; }
+  .session-actions .launch-group { flex: 1 1 100%; }
   .session-actions .button { flex: 1 1 calc(50% - .2rem); }
   .management-panel { padding: 18px 14px; }
   .section-heading { padding: 16px 14px; }

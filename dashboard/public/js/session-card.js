@@ -41,9 +41,11 @@ export function createSessionCard(session, { onTerminate, onOpenTerminal, onOpen
           <span data-role="status"></span>
           <div class="session-meters">${meter('CPU', 'cpu')}${meter('Mem', 'memory')}</div>
           <div class="session-actions">
-            <button class="button button--primary button--small" data-action="claude">Open Claude</button>
-            <button class="button button--primary button--small" data-action="codex">Open Codex</button>
-            <button class="button button--primary button--small" data-action="ralph" hidden>Open Ralph</button>
+            <div class="launch-group" role="group" aria-label="Open an agent">
+              <button class="launch-group__item" data-action="claude" aria-label="Open Claude">Claude</button>
+              <button class="launch-group__item" data-action="codex" aria-label="Open Codex">Codex</button>
+              <button class="launch-group__item" data-action="ralph" aria-label="Open Ralph" hidden>Ralph</button>
+            </div>
             <button class="button button--secondary button--small" data-action="terminal">Terminal</button>
             <button class="button button--danger button--small" data-action="terminate">Terminate</button>
           </div>

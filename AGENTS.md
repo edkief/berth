@@ -199,10 +199,12 @@ found after the banner has scrolled off) for that pattern — or the older
 `/code/session_<id>` form — and caches the last match as `claudeUrl` in its
 health response. `sessions.js` re-validates it server-side
 (`validClaudeUrl()`) before handing it to the UI, so a malformed or stale
-capture never becomes a link. The dashboard surfaces it as an **Open Claude**
-button that jumps straight to the live remote session instead of the
-terminal; the cached URL is cleared on relaunch so a new registration is
-required before the button reappears.
+capture never becomes a link. The dashboard surfaces it as **Claude** in the
+card's launch group (Claude · Codex · Ralph), which jumps straight to the live
+remote session instead of the terminal; the cached URL is cleared on relaunch
+so a new registration is required before it is enabled again. In that group,
+state is the dot (filled = can open), never the fill: a dimmed primary button
+read as enabled.
 
 ## Codex
 
@@ -266,7 +268,7 @@ workspaces started afterwards.
 - **The button follows a probe, not the pod.** The agent GETs
   `$RALPH_UI_BASE_PATH/api/status` on loopback every `RALPH_PROBE_MS` (5 s),
   off the request path, and reports `ralph` in `/healthz`; the sessions list
-  re-reads `/healthz` on every poll. *Open Ralph* shows only when the dashboard
+  re-reads `/healthz` on every poll. *Ralph* in the launch group shows only when the dashboard
   has it enabled **and** the pod has a `ralph-ui` port, and is enabled only
   while the UI answers; its tooltip carries the run status or the reason.
   Ralph never affects readiness or liveness.
