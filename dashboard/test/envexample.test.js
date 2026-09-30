@@ -65,6 +65,7 @@ test('dashboard/.env.example defaults match the code defaults', () => {
         WORKSPACE_MEM_LIMIT: cfg.workspaceResources.limits.memory,
         WORKSPACE_EPHEMERAL_LIMIT: cfg.workspaceResources.limits['ephemeral-storage'],
         MAX_WORKSPACES: cfg.maxWorkspaces,
+        RALPH_UI_PORT: cfg.ralph.uiPort,
         SESSIONS_CACHE_MS: cfg.sessionsCacheMs,
         PVC_CACHE_MS: cfg.pvcCacheMs,
         TARGET_CACHE_MS: cfg.targetCacheMs,
@@ -96,6 +97,8 @@ test('workspace/.env.example documents every var the pod template injects', () =
         repoUrl: 'git@github.com:e/r.git', repoFullName: 'e/r',
         branch: 'main', baseBranch: 'main', sessionName: 'r-main',
         pvcName: 'berth-ws-x-0badf00d',
+        // Opt-in, so enable it here: its variables are part of the contract too.
+        ralph: { enabled: true, uiPort: 4280 },
     });
 
     const injected = manifest.spec.containers[0].env.map((e) => e.name);

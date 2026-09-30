@@ -34,6 +34,7 @@ function buildWorkspacePodManifest({
     id, key, repoUrl, repoFullName, branch, baseBranch,
     newBranch = null, sessionName, pvcName, resetHard = false,
     resourceProfile = 'default', resources = cfg.workspaceResources,
+    ralph = cfg.ralph,
 }) {
     const branchSlug = slug(branch, 40);
 
@@ -89,6 +90,7 @@ function buildWorkspacePodManifest({
                     { containerPort: 7681, name: 'tty' },
                     { containerPort: 7682, name: 'agent' },
                     { containerPort: 7684, name: 'codex-ui' },
+                    ...(ralph.enabled ? [{ containerPort: ralph.uiPort, name: 'ralph-ui' }] : []),
                 ],
                 env: [
                     { name: 'WORKSPACE_ID', value: id },
@@ -106,6 +108,7 @@ function buildWorkspacePodManifest({
                     // supervisord. CODEX_HOME stays on the repo PVC across
                     // pod swaps.
                     { name: 'CODEX_HOME', value: '/workspace/_home/codex' },
+                    ...ralphEnv(id, ralph),
                     { name: 'CLAUDE_CODE_VERSION', value: cfg.claudeCodeVersion },
                     { name: 'CONFIG_PUSH_POLICY', value: cfg.configPushPolicy },
                     // Where the shared OAuth token lives. Propagated rather
@@ -162,6 +165,25 @@ function buildWorkspacePodManifest({
             ],
         },
     };
+}
+
+/**
+ * Ralph is started by hand from the terminal, so these are read by `ralph`
+ * itself, not by anything the pod runs on its own. RALPH_UI makes every loop
+ * serve its web UI; the host, port and base path put it where the dashboard
+ * proxies it. 0.0.0.0 because the dashboard reaches the pod IP, never
+ * loopback -- the NetworkPolicy and the ingress auth are the boundary, the
+ * same as for ttyd and codexapp.
+ */
+function ralphEnv(id, ralph) {
+    if (!ralph.enabled) return [];
+    return [
+        { name: 'RALPH_ENABLE', value: '1' },
+        { name: 'RALPH_UI', value: '1' },
+        { name: 'RALPH_UI_HOST', value: '0.0.0.0' },
+        { name: 'RALPH_UI_PORT', value: String(ralph.uiPort) },
+        { name: 'RALPH_UI_BASE_PATH', value: `/ralph/${id}` },
+    ];
 }
 
 module.exports = { buildWorkspacePodManifest, LABEL, ANN };

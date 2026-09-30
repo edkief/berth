@@ -158,6 +158,11 @@ spec:
             # restarting changes the S3 credentials handed to new workspaces.
             - name: CONFIG_PUSH_POLICY
               value: "any"
+            # "1" adds Open Ralph to workspaces started afterwards. The UI
+            # port defaults to Ralph's 4280; changing it (RALPH_UI_PORT) means
+            # changing k8s/networkpolicy.yaml too.
+            - name: RALPH_ENABLE
+              value: "0"
             - name: GITHUB_USER
               value: "edkief"
             - name: GITHUB_TOKEN

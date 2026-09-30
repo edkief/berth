@@ -77,6 +77,14 @@ module.exports = {
 
     maxWorkspaces: intEnv('MAX_WORKSPACES', 4),
 
+    // Ralph, the agent loop, is opt-in. Its web UI is proxied at /ralph/<id>/
+    // and is up only while someone has started ralph from the terminal. The
+    // port defaults to Ralph's own default and must match the NetworkPolicy.
+    ralph: {
+        enabled: boolEnv('RALPH_ENABLE', false),
+        uiPort: intEnv('RALPH_UI_PORT', 4280),
+    },
+
     // Resource profiles share the dashboard's existing config PVC. The store
     // is a separate file because claude-config-sync owns the rest of this tree.
     resourceProfilesPath: env('RESOURCE_PROFILES_PATH',
