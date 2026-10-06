@@ -55,7 +55,7 @@ USER ubuntu
 # args immediately before their use so a version bump does not invalidate the
 # expensive OS, Gradle and ttyd layers above it.
 ARG CODEX_CLI_VERSION=0.153.4
-ARG CODEX_APP_VERSION=0.1.87
+ARG CODEX_APP_VERSION=0.1.91
 # 0.1.87 was republished in place with the --base-path CLI contract. Consume
 # this arg in the install layer so builders cannot reuse the pre-republish
 # package from Docker's cache.
