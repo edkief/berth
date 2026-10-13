@@ -639,6 +639,17 @@ leaves the MCP server's pinned revision missing. The MCP config launches the
 @playwright/mcp@latest`, which would re-fetch from the registry on every start
 and could lose the race against the connect timeout during bootstrap.
 
+OpenCode V2 is the official `@opencode/cli` package (bins `opencode` and
+`opencode2`) — **not** the unrelated third-party `opencode2` package, and not
+`opencode-ai`, which is still 1.x. It follows the claude-code pattern: the
+Dockerfile installs the newest at build time, and `entrypoint.sh` reinstalls
+`OPENCODE_VERSION` (dashboard setting, default `latest`) on every boot. Its
+postinstall is what puts the real binary in place, so every install needs
+`--allow-scripts=@opencode/cli`. It is a terminal tool only: no supervisord
+program, proxy route or readiness gate. Its state (`~/.local/share/opencode`,
+`~/.config/opencode`) is on the container layer, so an OpenCode login does not
+survive a pod restart.
+
 ## Postgres
 
 Each workspace runs its own Postgres on `localhost:5432` (`postgres`/`postgres`),

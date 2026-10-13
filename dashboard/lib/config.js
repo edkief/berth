@@ -58,6 +58,7 @@ module.exports = {
     workspaceImage: env('WORKSPACE_IMAGE', 'registry.kieffer.me/berth/workspace:latest'),
     imagePullPolicy: env('WORKSPACE_IMAGE_PULL_POLICY', 'Always'),
     claudeCodeVersion: env('CLAUDE_CODE_VERSION', 'latest'),
+    opencodeVersion: env('OPENCODE_VERSION', 'latest'),
 
     storageClass: env('WORKSPACE_STORAGE_CLASS', 'truenas-iscsi-ssd'),
     storageSize: env('WORKSPACE_STORAGE_SIZE', '20Gi'),

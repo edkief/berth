@@ -61,7 +61,11 @@ ARG CODEX_APP_VERSION=0.1.91
 # package from Docker's cache.
 ARG CODEX_APP_REVISION=2
 # npm 11 blocks dependency lifecycle scripts unless explicitly allowed.
-# codexapp/node-pty need theirs to select or build the native PTY binding.
+# codexapp/node-pty need theirs to select or build the native PTY binding;
+# @opencode/cli (OpenCode V2) ships a placeholder `opencode` that its
+# postinstall swaps for the platform binary, so without it the CLI only prints
+# "postinstall script was not run". Like claude-code it is unpinned here and
+# brought to OPENCODE_VERSION by entrypoint.sh on every boot.
 RUN curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.5/install.sh | bash \
     && test -n "$CODEX_APP_REVISION" \
     && . "$NVM_DIR/nvm.sh" \
@@ -70,8 +74,8 @@ RUN curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.5/install.sh | b
     && nvm use default \
     && npm config set @edkief:registry https://npm.kieffer.me/ \
     && npm install -g \
-        --allow-scripts=@anthropic-ai/claude-code,@edkief/codexapp,node-pty,@firebase/util,protobufjs \
-        pnpm @anthropic-ai/claude-code \
+        --allow-scripts=@anthropic-ai/claude-code,@edkief/codexapp,node-pty,@firebase/util,protobufjs,@opencode/cli \
+        pnpm @anthropic-ai/claude-code @opencode/cli \
         "@openai/codex@${CODEX_CLI_VERSION}" \
         "@edkief/codexapp@${CODEX_APP_VERSION}"
 
@@ -93,7 +97,9 @@ RUN . "$NVM_DIR/nvm.sh" \
     && ln -s "$(which claude)" /usr/local/bin/claude \
     && ln -s "$(which codex)" /usr/local/bin/codex \
     && ln -s "$(which codexapp)" /usr/local/bin/codexapp \
-    && ln -s "$(which codexui)" /usr/local/bin/codexui
+    && ln -s "$(which codexui)" /usr/local/bin/codexui \
+    && ln -s "$(which opencode)" /usr/local/bin/opencode \
+    && ln -s "$(which opencode2)" /usr/local/bin/opencode2
 RUN ln -s /home/ubuntu/.cargo/bin/cargo     /usr/local/bin/cargo \
     && ln -s /home/ubuntu/.cargo/bin/rustc  /usr/local/bin/rustc \
     && ln -s /home/ubuntu/.cargo/bin/rustup /usr/local/bin/rustup \

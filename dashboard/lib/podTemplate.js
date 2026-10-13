@@ -110,6 +110,7 @@ function buildWorkspacePodManifest({
                     { name: 'CODEX_HOME', value: '/workspace/_home/codex' },
                     ...ralphEnv(id, ralph),
                     { name: 'CLAUDE_CODE_VERSION', value: cfg.claudeCodeVersion },
+                    { name: 'OPENCODE_VERSION', value: cfg.opencodeVersion },
                     { name: 'CONFIG_PUSH_POLICY', value: cfg.configPushPolicy },
                     // Where the shared OAuth token lives. Propagated rather
                     // than defaulted per-pod: a dashboard pointing at a

@@ -148,6 +148,19 @@ if command -v npm >/dev/null 2>&1; then
     fi
 fi
 
+# ----------------------------------------------------------------- opencode
+# OpenCode V2. Its postinstall places the real binary (and picks the AVX2 or
+# baseline build for *this* node's CPU, not the image builder's), so it must
+# be allowed to run. `opencode --version` prints "opencode v2.0.26".
+OPENCODE_VERSION="${OPENCODE_VERSION:-latest}"
+if command -v npm >/dev/null 2>&1; then
+    CURRENT_VERSION="$(opencode --version 2>/dev/null | awk '{print $NF}' | sed 's/^v//' || true)"
+    if [ "$OPENCODE_VERSION" = "latest" ] || [ "$CURRENT_VERSION" != "$OPENCODE_VERSION" ]; then
+        npm install -g --allow-scripts=@opencode/cli "@opencode/cli@${OPENCODE_VERSION}" \
+            || echo "[entrypoint] WARN: opencode install failed, keeping ${CURRENT_VERSION:-unknown}"
+    fi
+fi
+
 # -------------------------------------------------------------------- ralph
 # Opt-in, and from a private registry: a failure here warns and keeps whatever
 # the image shipped, never fails the bootstrap. The timeout stops an
