@@ -14,7 +14,7 @@ for (const name of Object.keys(process.env)) {
 const cfg = require('../lib/config');
 const { describePod } = require('../lib/sessions');
 const { buildWorkspacePodManifest } = require('../lib/podTemplate');
-const { ralphFromStatus } = require('../../workspace/agent');
+const { ralphFromStatus, parseSupervisorStatus } = require('../../workspace/agent');
 
 const ID = 'berth-ws-x-0badf00d';
 
@@ -110,4 +110,25 @@ test('agent: a Ralph that serves its app instead of its API is not usable', () =
     assert.match(r.reason, /RALPH_UI_BASE_PATH/);
 
     assert.equal(ralphFromStatus(404, '{"error":"Not found"}').ui, false);
+});
+
+test('agent: reads the ralph program state from supervisorctl status', () => {
+    assert.deepEqual(
+        parseSupervisorStatus('ralph                            RUNNING   pid 812, uptime 0:04:13'),
+        { state: 'RUNNING', detail: 'pid 812, uptime 0:04:13' });
+    assert.deepEqual(
+        parseSupervisorStatus('ralph                            FATAL     Exited too quickly (process log may have details)\n'),
+        { state: 'FATAL', detail: 'Exited too quickly (process log may have details)' });
+    assert.deepEqual(
+        parseSupervisorStatus('ralph                            STOPPED   Not started'),
+        { state: 'STOPPED', detail: 'Not started' });
+    // Another program's line is not ralph's.
+    assert.equal(parseSupervisorStatus('ralphy   RUNNING   pid 1, uptime 0:00:01'), null);
+});
+
+test('agent: supervisord not saying is unknown, not stopped', () => {
+    assert.equal(parseSupervisorStatus('ralph: ERROR (no such process)'), null);
+    assert.equal(parseSupervisorStatus('unix:///var/run/supervisor.sock no such file'), null);
+    assert.equal(parseSupervisorStatus(''), null);
+    assert.equal(parseSupervisorStatus(undefined), null);
 });
