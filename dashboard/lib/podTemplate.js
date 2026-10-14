@@ -108,6 +108,9 @@ function buildWorkspacePodManifest({
                     // supervisord. CODEX_HOME stays on the repo PVC across
                     // pod swaps.
                     { name: 'CODEX_HOME', value: '/workspace/_home/codex' },
+                    // pi (Ralph's other harness) keeps its auth and models.json
+                    // here, on the PVC, for the same reason.
+                    { name: 'PI_CODING_AGENT_DIR', value: '/workspace/_home/pi' },
                     ...ralphEnv(id, ralph),
                     { name: 'CLAUDE_CODE_VERSION', value: cfg.claudeCodeVersion },
                     { name: 'OPENCODE_VERSION', value: cfg.opencodeVersion },

@@ -21,6 +21,7 @@ export BRANCH_SLUG="${BRANCH_SLUG:-$(echo "$BRANCH" | tr -c 'a-zA-Z0-9-' '-')}"
 export CLAUDE_SESSION_NAME="${CLAUDE_SESSION_NAME:-$WORKSPACE_ID}"
 export TTY_BASE_PATH="${TTY_BASE_PATH:-/tty/$WORKSPACE_ID}"
 export CODEX_HOME="${CODEX_HOME:-/workspace/_home/codex}"
+export PI_CODING_AGENT_DIR="${PI_CODING_AGENT_DIR:-/workspace/_home/pi}"
 export GITHUB_TOKEN="${GITHUB_TOKEN:-}"
 # Everything below (and the tmux server, and claude inside it) resolves
 # ~/.claude from HOME; CRI does not set it from the image user.
@@ -76,6 +77,39 @@ chmod 700 "$CODEX_HOME"
 if [ ! -e /home/ubuntu/.codex ]; then
     ln -s "$CODEX_HOME" /home/ubuntu/.codex
 fi
+
+# Ralph's harnesses keep their logins and model config in $HOME, which is the
+# container layer: without this, every container restart logs them out and the
+# autostarted Ralph daemon fails its next batch. Same answer as for Codex --
+# the state lives under /workspace/_home on the repo's PVC.
+#
+# persist_home <path under $HOME> <dir on the PVC>: make the home path a
+# symlink to the PVC dir. Anything already at the home path (a first boot
+# with state on the container layer) is merged in without overwriting what
+# the PVC already holds.
+persist_home() {
+    local link="/home/ubuntu/$1" target="$2"
+    mkdir -p "$target"
+    chmod 700 "$target"
+    if [ -L "$link" ]; then
+        [ "$(readlink "$link")" = "$target" ] && return 0
+        rm -f "$link"
+    elif [ -d "$link" ]; then
+        cp -an "$link/." "$target/" 2>/dev/null || true
+        rm -rf "$link"
+    fi
+    mkdir -p "$(dirname "$link")"
+    ln -s "$target" "$link"
+}
+# OpenCode has no variable for its data dir short of XDG_DATA_HOME, which would
+# move every tool's, so its three dirs are linked: data (auth.json, sessions,
+# opencode.db), config, and state (recent models). Its cache is re-downloadable.
+persist_home .local/share/opencode /workspace/_home/opencode/data
+persist_home .config/opencode     /workspace/_home/opencode/config
+persist_home .local/state/opencode /workspace/_home/opencode/state
+# pi moves its whole ~/.pi/agent (auth, models.json, settings, sessions) with
+# PI_CODING_AGENT_DIR, set on the pod; the link covers anything that drops it.
+persist_home .pi/agent "$PI_CODING_AGENT_DIR"
 if [ ! -e "$CLAUDE_CONFIG_TARGET" ]; then
     if [ -f "$CLAUDE_CONFIG_FILE" ] && [ ! -L "$CLAUDE_CONFIG_FILE" ]; then
         mv "$CLAUDE_CONFIG_FILE" "$CLAUDE_CONFIG_TARGET"
