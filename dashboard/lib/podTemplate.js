@@ -170,12 +170,15 @@ function buildWorkspacePodManifest({
 }
 
 /**
- * Ralph is started by hand from the terminal, so these are read by `ralph`
- * itself, not by anything the pod runs on its own. RALPH_UI makes every loop
- * serve its web UI; the host, port and base path put it where the dashboard
- * proxies it. 0.0.0.0 because the dashboard reaches the pod IP, never
- * loopback -- the NetworkPolicy and the ingress auth are the boundary, the
- * same as for ttyd and codexapp.
+ * Read by `ralph` itself -- the supervised daemon and any ralph started by
+ * hand -- plus RALPH_ENABLE, which turns on the agent's side. RALPH_UI makes a
+ * hand-run loop serve its web UI too (the daemon always does); the host, port
+ * and base path put it where the dashboard proxies it. 0.0.0.0 because the
+ * dashboard reaches the pod IP, never loopback -- the NetworkPolicy and the
+ * ingress auth are the boundary, the same as for ttyd and codexapp. That is
+ * also why RALPH_UI_ACTIONS is `open`: off loopback, Ralph otherwise refuses
+ * every action (Plan, Run, Pause, answering it), and setting Ralph up from
+ * the dashboard means planning in its UI.
  */
 function ralphEnv(id, ralph) {
     if (!ralph.enabled) return [];
@@ -185,6 +188,7 @@ function ralphEnv(id, ralph) {
         { name: 'RALPH_UI_HOST', value: '0.0.0.0' },
         { name: 'RALPH_UI_PORT', value: String(ralph.uiPort) },
         { name: 'RALPH_UI_BASE_PATH', value: `/ralph/${id}` },
+        { name: 'RALPH_UI_ACTIONS', value: 'open' },
     ];
 }
 

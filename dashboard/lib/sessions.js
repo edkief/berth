@@ -177,9 +177,23 @@ function ralphAvailable(pod) {
         .some((p) => p.name === 'ralph-ui');
 }
 
+const SUPERVISOR_STATES = new Set([
+    'STOPPED', 'STARTING', 'RUNNING', 'BACKOFF', 'STOPPING', 'EXITED', 'FATAL', 'UNKNOWN',
+]);
+
+/** supervisord's word on the daemon, or null when it gave none we know. */
+function validDaemon(daemon) {
+    if (!daemon || !SUPERVISOR_STATES.has(daemon.state)) return null;
+    return {
+        state: daemon.state,
+        detail: typeof daemon.detail === 'string' ? daemon.detail.slice(0, 200) : null,
+    };
+}
+
 /**
- * The agent's view of Ralph, reduced to what the card shows. `ui` is the only
- * thing that enables the button; the rest is its tooltip.
+ * The agent's view of Ralph, reduced to what the card shows: whether its UI
+ * answers, whether the checkout is set up for it, and what supervisord says
+ * about the daemon. `public/js/ralph-state.mjs` turns that into the button.
  */
 function ralphState(agentHealth) {
     const r = agentHealth?.ralph;
@@ -195,6 +209,8 @@ function ralphState(agentHealth) {
         reason: typeof r.reason === 'string' ? r.reason : null,
         tasks: r.tasks || null,
         run: r.run || null,
+        configured: r.configured === true,
+        daemon: validDaemon(r.daemon),
     };
 }
 
@@ -397,5 +413,5 @@ module.exports = {
     deriveStatus, describePod, stageLabel, FATAL_STAGES, describeWithContext, listSessions, getSession,
     createSession, deleteSession, restartSession,
     ConflictError, CapacityError, sessionsCache,
-    parseCpuLimit, parseMemLimit,
+    parseCpuLimit, parseMemLimit, ralphAvailable,
 };

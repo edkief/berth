@@ -345,6 +345,28 @@ app.get('/api/sessions/:id/health', asyncRoute(async (req, res) => {
     res.json(agent.healthEnvelope({ podIP, probe }));
 }));
 
+// Start the workspace's supervised Ralph daemon. The agent does the work
+// (no pods/exec), and answers at once: the daemon takes seconds to come up,
+// which the card's next polls show.
+app.post('/api/sessions/:id/ralph/start', asyncRoute(async (req, res) => {
+    const pod = await k8s.getPod(req.params.id);
+    if (!pod) return res.status(404).json({ error: 'not_found', message: 'session not found' });
+    if (!sessions.ralphAvailable(pod)) {
+        return res.status(404).json({ error: 'not_found', message: 'Ralph is not enabled for this workspace' });
+    }
+    const podIP = pod.status?.podIP;
+    if (!podIP) return res.status(409).json({ error: 'not_ready', message: 'the workspace has no IP yet' });
+    const answer = await agent.agentPost(podIP, '/ralph/start');
+    if (!answer || answer.status >= 400) {
+        return res.status(502).json({
+            error: 'agent',
+            message: answer?.body?.error || 'the workspace agent did not answer',
+        });
+    }
+    ttyProxy.invalidateTarget(req.params.id);
+    res.status(answer.status).json(answer.body);
+}));
+
 // --------------------------------------------------------------- workspaces
 
 /** Live disk numbers where a pod is running; annotation fallback otherwise. */
