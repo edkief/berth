@@ -99,6 +99,14 @@ h3 { font-size: 16px; }
 .launch-group__item:hover:not(:disabled) { color: var(--accent-bright); background: var(--tint); }
 .launch-group__item:disabled { color: var(--muted); opacity: 1; }
 .launch-group__item:disabled::before { background: transparent; box-shadow: inset 0 0 0 1px currentColor; }
+/* Ralph has more states than open/closed (js/ralph-state.mjs): running is the
+   filled dot above; starting pulses it; a set-up Ralph that is down is a ring
+   in the accent; one not set up yet is a dashed, muted ring. */
+.launch-group__item--ralph-starting::before { animation: ralph-pulse 1.2s ease-in-out infinite; }
+.launch-group__item--ralph-stopped::before { background: transparent; box-shadow: inset 0 0 0 1.5px var(--accent); }
+.launch-group__item--ralph-unset::before { box-sizing: border-box; border: 1px dashed var(--muted); background: transparent; }
+@keyframes ralph-pulse { 50% { opacity: .25; } }
+@media (prefers-reduced-motion: reduce) { .launch-group__item--ralph-starting::before { animation: none; opacity: .5; } }
 .session-diagnostics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-top: 1px solid var(--line-soft); }
 .details { min-width: 0; }
 .details + .details { border-left: 1px solid var(--line-soft); }

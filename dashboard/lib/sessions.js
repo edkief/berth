@@ -209,7 +209,9 @@ function ralphState(agentHealth) {
         reason: typeof r.reason === 'string' ? r.reason : null,
         tasks: r.tasks || null,
         run: r.run || null,
-        configured: r.configured === true,
+        // null, not false: an agent that predates supervising Ralph cannot say,
+        // and the card must not offer to set up what it cannot start.
+        configured: typeof r.configured === 'boolean' ? r.configured : null,
         daemon: validDaemon(r.daemon),
     };
 }

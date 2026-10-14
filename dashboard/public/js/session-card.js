@@ -1,5 +1,6 @@
 import { api } from './api.js';
 import { attentionStatus, barTone, escHtml, fmtCpu, fmtDate, fmtMem } from './format.js';
+import { RALPH_STATES, ralphView } from './ralph-state.mjs';
 
 const PANEL_MS = { health: 5000, logs: 3000 };
 
@@ -14,16 +15,6 @@ function summary(health) {
 }
 
 function statusClass(status) { return `status status--${String(status || 'unknown').replace(/[^a-z-]/g, '')}`; }
-
-/** Tooltip for the Ralph button: why it is off, or where the latest run stands. */
-function ralphTitle(ralph) {
-  if (!ralph?.ui) return `Ralph ${ralph?.reason || 'is not running'} — start it from the terminal with \`ralph\``;
-  const run = ralph.run;
-  const tasks = ralph.tasks?.total != null ? `${ralph.tasks.passed}/${ralph.tasks.total} tasks` : null;
-  if (!run) return ['Ralph web UI', tasks].filter(Boolean).join(' · ');
-  const iteration = run.iteration != null ? `iteration ${run.iteration}${run.maxIterations ? `/${run.maxIterations}` : ''}` : null;
-  return [`Ralph ${run.live ? 'running' : run.status || 'idle'}`, run.live ? run.taskId : null, iteration, tasks].filter(Boolean).join(' · ');
-}
 
 export function createSessionCard(session, { onTerminate, onOpenTerminal, onOpenCodex, onOpenClaude, onOpenRalph }) {
   const card = document.createElement('article');
@@ -89,12 +80,15 @@ export function updateSessionCard(card, session) {
   claude.title = claude.disabled
     ? session.claudeUrl ? session.message || 'Claude session is reconnecting' : 'Claude session link is still being discovered'
     : '';
-  // Ralph is started by hand, so the button follows the agent's probe of its
-  // web UI (refreshed with every sessions poll), not the workspace status.
+  // The button follows the agent's view of Ralph (re-read with every sessions
+  // poll), not the workspace status; the dot says which state it is in.
   const ralph = card.querySelector('[data-action="ralph"]');
+  const view = ralphView(session.ralph);
   ralph.hidden = !session.ralphUrl;
-  ralph.disabled = !session.ralph?.ui;
-  ralph.title = session.ralphUrl ? ralphTitle(session.ralph) : '';
+  ralph.disabled = !view.action;
+  ralph.title = session.ralphUrl ? view.title : '';
+  ralph.setAttribute('aria-label', view.label);
+  for (const state of RALPH_STATES) ralph.classList.toggle(`launch-group__item--ralph-${state}`, state === view.state);
   card.querySelector('[data-raw="health"]').href = `/api/sessions/${encodeURIComponent(session.id)}/health`;
   card.querySelector('[data-raw="logs"]').href = `/api/sessions/${encodeURIComponent(session.id)}/logs?tail=${card.querySelector('[data-lines]').value}`;
 }

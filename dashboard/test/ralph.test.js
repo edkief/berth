@@ -79,7 +79,7 @@ test('describePod offers Ralph only when the dashboard and the pod both have it'
         assert.equal(s.ralphUrl, `/ralph/${ID}/`);
         assert.deepEqual(s.ralph, {
             ui: true, reason: null, tasks: { passed: 1, total: 3 }, run: null,
-            configured: false, daemon: null,
+            configured: null, daemon: null,
         });
     });
 });
@@ -88,7 +88,7 @@ test('describePod keeps the Ralph button off, with a reason, when nothing says i
     const p = { ...manifest({ enabled: true, uiPort: 4280 }), status: { phase: 'Running' } };
     withRalphEnabled(() => {
         assert.deepEqual(describePod(p, { agentHealth: { ralph: { ui: false, reason: 'not running' } } }).ralph,
-            { ui: false, reason: 'not running', tasks: null, run: null, configured: false, daemon: null });
+            { ui: false, reason: 'not running', tasks: null, run: null, configured: null, daemon: null });
         assert.equal(describePod(p, { agentHealth: {} }).ralph.ui, false, 'an agent that predates Ralph');
         assert.equal(describePod(p).ralph.ui, false, 'no agent answer at all');
     });
@@ -150,7 +150,8 @@ test('describePod passes on whether Ralph is set up and what supervisord says', 
         assert.equal(fatal.configured, true);
         assert.deepEqual(fatal.daemon, { state: 'FATAL', detail: 'Exited too quickly (process log may have details)' });
         // Only states supervisord actually has, and only a boolean `configured`.
-        assert.equal(ralph({ ui: false, configured: 'yes', daemon: { state: 'ON FIRE' } }).configured, false);
+        assert.equal(ralph({ ui: false, configured: false }).configured, false);
+        assert.equal(ralph({ ui: false, configured: 'yes' }).configured, null, 'only a boolean counts');
         assert.equal(ralph({ ui: false, daemon: { state: 'ON FIRE' } }).daemon, null);
         assert.equal(ralph({ ui: false, daemon: 'RUNNING' }).daemon, null);
     });
