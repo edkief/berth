@@ -113,22 +113,33 @@ RUN ln -s /home/ubuntu/.cargo/bin/cargo     /usr/local/bin/cargo \
 # Playwright: the CLI/library (as ubuntu) plus the MCP server so Claude can drive
 # a browser for testing, and the Chromium browser + its OS deps installed to a
 # shared, container-wide path (as root) so every process can find them.
+# @playwright/cli (`playwright-cli`) is the same for agents without MCP: Ralph
+# has pi check a screen with it, and `ralph doctor` warns when it is missing.
 USER ubuntu
 RUN . "$NVM_DIR/nvm.sh" \
-    && npm install -g playwright @playwright/mcp
+    && npm install -g playwright @playwright/mcp @playwright/cli
 USER root
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
+# playwright-cli otherwise launches the *branded* Chrome channel, which is not
+# installed here; chromium is the browser installed below. It reads the MCP
+# server's config variables, and the MCP server is already run with
+# --browser chromium, so this changes nothing for it.
+ENV PLAYWRIGHT_MCP_BROWSER=chromium
 # Browsers are installed through *each* package's own playwright-core, because
-# `playwright` and `@playwright/mcp` pin different revisions and each will only
-# launch the one it pinned. Running just the `playwright` CLI here left the MCP
-# server with chromium-1234 when its bundled core wanted 1243, so every
-# browser_navigate failed with "Executable doesn't exist" long after the server
-# itself had started fine. --with-deps once (as root) covers the OS packages for
-# both; the second install only fetches the browser.
+# `playwright`, `@playwright/mcp` and `@playwright/cli` pin different revisions
+# and each will only launch the one it pinned. Running just the `playwright` CLI
+# here left the MCP server with chromium-1234 when its bundled core wanted 1243,
+# so every browser_navigate failed with "Executable doesn't exist" long after
+# the server itself had started fine. --with-deps once (as root) covers the OS
+# packages for all three; the other installs only fetch their browser.
+# playwright-cli is linked for the same reason as ralph below: the Ralph daemon
+# runs under supervisord, with no nvm on its PATH.
 RUN . "$NVM_DIR/nvm.sh" \
     && apt-get update \
     && playwright install --with-deps chromium \
     && node "$(npm root -g)/@playwright/mcp/node_modules/playwright-core/cli.js" install chromium \
+    && node "$(npm root -g)/@playwright/cli/node_modules/playwright-core/cli.js" install chromium \
+    && ln -sf "$(which playwright-cli)" /usr/local/bin/playwright-cli \
     && rm -rf /var/lib/apt/lists/*
 
 USER ubuntu
