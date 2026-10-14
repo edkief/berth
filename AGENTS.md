@@ -259,8 +259,10 @@ workspaces started afterwards.
   `/usr/local/bin/ralph` is linked even when the image install failed; it
   dangles until a boot install fills it.
 - **Its harnesses ship in the image**: OpenCode V2 (its default) and pi
-  (`@earendil-works/pi-coding-agent`), both under *Bundled workspace tooling*.
-  Without a usable one the daemon exits 5 and ends `FATAL`.
+  (`@earendil-works/pi-coding-agent`), both under *Bundled workspace tooling*,
+  with their logins on the PVC so they survive restarts, and `playwright-cli`
+  for pi's browser checks. Without a usable harness the daemon exits 5 and
+  ends `FATAL`.
 - **supervisord runs the daemon, headless.** `[program:ralph]` is
   `ralph daemon` in the checkout, `autostart=false`, and the agent decides
   when to start it (over supervisord's root-only socket, `sudo -n
@@ -331,6 +333,9 @@ workspaces started afterwards.
 /workspace/                 ← the repo's PVC
   _home/claude/             ← mounted at ~/.claude (subPath)
   _home/claude.json         ← ~/.claude.json symlinks here
+  _home/codex/              ← CODEX_HOME
+  _home/opencode/{data,config,state}/ ← ~/.local/share|.config|.local/state/opencode symlink here
+  _home/pi/                 ← PI_CODING_AGENT_DIR (~/.pi/agent symlinks here)
   main/                     ← checkout
   feature-x/                ← checkout
 ```
@@ -680,9 +685,10 @@ Secrets: see `k8s/secrets.example.yaml` (`github-ssh-key`,
 The workspace image also carries `gh` (GitHub CLI, pre-authenticated from the
 same PAT used for cloning) and Playwright, with a `playwright-mcp` MCP server
 registered in the shared `~/.claude.json` bundle for browser automation from
-inside a session. `playwright` and `@playwright/mcp` are separate globals that
-each bundle and launch their own pinned `playwright-core`/chromium revision, so
-the Dockerfile installs the browser through *both* packages' own
+inside a session. `playwright`, `@playwright/mcp` and `@playwright/cli` are
+separate globals that each bundle and launch their own pinned
+`playwright-core`/chromium revision, so the Dockerfile installs the browser
+through *each* package's own
 `playwright-core` — installing it once through the `playwright` CLI alone
 leaves the MCP server's pinned revision missing. The MCP config launches the
 `playwright-mcp` binary already on `PATH` rather than `npx -y
@@ -696,9 +702,8 @@ Dockerfile installs the newest at build time, and `entrypoint.sh` reinstalls
 `OPENCODE_VERSION` (dashboard setting, default `latest`) on every boot. Its
 postinstall is what puts the real binary in place, so every install needs
 `--allow-scripts=@opencode/cli`. It is a terminal tool only: no supervisord
-program, proxy route or readiness gate. Its state (`~/.local/share/opencode`,
-`~/.config/opencode`) is on the container layer, so an OpenCode login does not
-survive a pod restart.
+program, proxy route or readiness gate (Ralph's daemon starts it as its own
+server).
 
 pi is `@earendil-works/pi-coding-agent` (bin `pi`), Ralph's other harness —
 **not** `@mariozechner/pi-coding-agent`, its deprecated predecessor frozen at
@@ -706,8 +711,26 @@ pi is `@earendil-works/pi-coding-agent` (bin `pi`), Ralph's other harness —
 the 1.x line rather than `latest`: the Dockerfile installs `@1`, and
 `entrypoint.sh` reinstalls `PI_VERSION` (dashboard setting, default `1`, an npm
 range or version) on every boot unless the installed version equals it. It
-has no install scripts. Like OpenCode it is a terminal tool, and its model
-config (`~/.pi/agent/models.json`) is on the container layer.
+has no install scripts. Like OpenCode it is a terminal tool.
+
+**Their logins live on the PVC**, like `CODEX_HOME`: `$HOME` is the container
+layer, so otherwise every container restart logged both out and the
+autostarted Ralph daemon failed its next batch. pi moves all of `~/.pi/agent`
+(auth, `models.json`, settings, sessions) with `PI_CODING_AGENT_DIR`, set on
+the pod to `/workspace/_home/pi`. OpenCode has no such variable short of the
+`XDG_*_HOME` ones every tool shares, so `entrypoint.sh`'s `persist_home` links
+its data (`auth.json`, sessions, `opencode.db`), config and state dirs to
+`/workspace/_home/opencode/*`, merging anything already on the container layer
+without overwriting the PVC's. Its cache is re-downloadable and stays put.
+`~/.pi/agent` is linked the same way, for anything that drops the variable.
+
+`@playwright/cli` (`playwright-cli`) is how Ralph has a **pi** agent check a
+screen, pi having no MCP; `ralph doctor` warns without it. It pins a third
+`playwright-core`, so its Chromium is installed through that core too. Left
+alone it launches the *branded* Chrome channel, which the image lacks, so the
+image sets `PLAYWRIGHT_MCP_BROWSER=chromium` — it reads the MCP server's
+variables, and the MCP server already runs `--browser chromium`. It is linked
+into `/usr/local/bin`, since the Ralph daemon's supervisord PATH has no nvm.
 
 ## Postgres
 
