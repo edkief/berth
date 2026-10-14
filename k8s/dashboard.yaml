@@ -156,6 +156,9 @@ spec:
               value: "latest"
             - name: OPENCODE_VERSION
               value: "latest"
+            # Ralph accepts only pi 1.x; "1" tracks the newest of it.
+            - name: PI_VERSION
+              value: "1"
             # any | dashboard | additive -- see AGENTS.md. Flipping this and
             # restarting changes the S3 credentials handed to new workspaces.
             - name: CONFIG_PUSH_POLICY

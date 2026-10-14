@@ -59,6 +59,8 @@ module.exports = {
     imagePullPolicy: env('WORKSPACE_IMAGE_PULL_POLICY', 'Always'),
     claudeCodeVersion: env('CLAUDE_CODE_VERSION', 'latest'),
     opencodeVersion: env('OPENCODE_VERSION', 'latest'),
+    // pi, Ralph's other harness. A range by default: Ralph accepts pi 1.x only.
+    piVersion: env('PI_VERSION', '1'),
 
     storageClass: env('WORKSPACE_STORAGE_CLASS', 'truenas-iscsi-ssd'),
     storageSize: env('WORKSPACE_STORAGE_SIZE', '20Gi'),

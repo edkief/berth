@@ -66,6 +66,9 @@ ARG CODEX_APP_REVISION=2
 # postinstall swaps for the platform binary, so without it the CLI only prints
 # "postinstall script was not run". Like claude-code it is unpinned here and
 # brought to OPENCODE_VERSION by entrypoint.sh on every boot.
+# pi (@earendil-works/pi-coding-agent) is Ralph's other harness. Ralph accepts
+# only pi >=1.1.0 <2, so it is held to the 1.x line here and by PI_VERSION at
+# boot; the old @mariozechner/pi-coding-agent stops at 0.73.1 and is rejected.
 RUN curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.5/install.sh | bash \
     && test -n "$CODEX_APP_REVISION" \
     && . "$NVM_DIR/nvm.sh" \
@@ -76,6 +79,7 @@ RUN curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.5/install.sh | b
     && npm install -g \
         --allow-scripts=@anthropic-ai/claude-code,@edkief/codexapp,node-pty,@firebase/util,protobufjs,@opencode/cli \
         pnpm @anthropic-ai/claude-code @opencode/cli \
+        "@earendil-works/pi-coding-agent@1" \
         "@openai/codex@${CODEX_CLI_VERSION}" \
         "@edkief/codexapp@${CODEX_APP_VERSION}"
 
@@ -99,7 +103,8 @@ RUN . "$NVM_DIR/nvm.sh" \
     && ln -s "$(which codexapp)" /usr/local/bin/codexapp \
     && ln -s "$(which codexui)" /usr/local/bin/codexui \
     && ln -s "$(which opencode)" /usr/local/bin/opencode \
-    && ln -s "$(which opencode2)" /usr/local/bin/opencode2
+    && ln -s "$(which opencode2)" /usr/local/bin/opencode2 \
+    && ln -s "$(which pi)" /usr/local/bin/pi
 RUN ln -s /home/ubuntu/.cargo/bin/cargo     /usr/local/bin/cargo \
     && ln -s /home/ubuntu/.cargo/bin/rustc  /usr/local/bin/rustc \
     && ln -s /home/ubuntu/.cargo/bin/rustup /usr/local/bin/rustup \

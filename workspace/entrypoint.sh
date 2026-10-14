@@ -161,6 +161,19 @@ if command -v npm >/dev/null 2>&1; then
     fi
 fi
 
+# ----------------------------------------------------------------------- pi
+# Ralph's other harness. PI_VERSION is an npm range or version, default `1`:
+# Ralph accepts only pi >=1.1.0 <2, so `latest` would let pi 2 break it. Read
+# from package.json, which is stable where `pi --version`'s output may not be.
+PI_VERSION="${PI_VERSION:-1}"
+if command -v npm >/dev/null 2>&1; then
+    CURRENT_VERSION="$(node -p "require('$(npm root -g)/@earendil-works/pi-coding-agent/package.json').version" 2>/dev/null || true)"
+    if [ "$CURRENT_VERSION" != "$PI_VERSION" ]; then
+        npm install -g "@earendil-works/pi-coding-agent@${PI_VERSION}" >/dev/null \
+            || echo "[entrypoint] WARN: pi install failed, keeping ${CURRENT_VERSION:-unknown}"
+    fi
+fi
+
 # -------------------------------------------------------------------- ralph
 # Opt-in, and from a private registry: a failure here warns and keeps whatever
 # the image shipped, never fails the bootstrap. The timeout stops an
