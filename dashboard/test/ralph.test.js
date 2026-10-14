@@ -5,11 +5,16 @@ const assert = require('node:assert');
 
 process.env.NAMESPACE = 'dev';
 process.env.KUBERNETES_SERVICE_HOST = '';
+// These tests also run inside Berth workspaces, whose pods export RALPH_ENABLE
+// and friends; read the code's defaults, not the environment's.
+for (const name of Object.keys(process.env)) {
+    if (name.startsWith('RALPH_')) delete process.env[name];
+}
 
 const cfg = require('../lib/config');
 const { describePod } = require('../lib/sessions');
 const { buildWorkspacePodManifest } = require('../lib/podTemplate');
-const { ralphFromStatus } = require('../../workspace/agent');
+const { ralphFromStatus, parseSupervisorStatus } = require('../../workspace/agent');
 
 const ID = 'berth-ws-x-0badf00d';
 
@@ -54,6 +59,9 @@ test('pod manifest: an enabled Ralph serves its UI where the dashboard proxies i
     assert.equal(env.RALPH_UI_PORT, '4390');
     // ...under the exact prefix it is proxied at, so nothing is rewritten.
     assert.equal(env.RALPH_UI_BASE_PATH, `/ralph/${ID}`);
+    // Off loopback, Ralph refuses Plan/Run/Pause unless actions are open; the
+    // ingress auth in front of the proxy is the boundary.
+    assert.equal(env.RALPH_UI_ACTIONS, 'open');
     assert.deepEqual(m.spec.containers[0].ports.find((p) => p.name === 'ralph-ui'),
         { containerPort: 4390, name: 'ralph-ui' });
 });
@@ -69,7 +77,10 @@ test('describePod offers Ralph only when the dashboard and the pod both have it'
             'pod started before Ralph was enabled');
         const s = describePod(withPort, { agentHealth });
         assert.equal(s.ralphUrl, `/ralph/${ID}/`);
-        assert.deepEqual(s.ralph, { ui: true, reason: null, tasks: { passed: 1, total: 3 }, run: null });
+        assert.deepEqual(s.ralph, {
+            ui: true, reason: null, tasks: { passed: 1, total: 3 }, run: null,
+            configured: null, daemon: null,
+        });
     });
 });
 
@@ -77,7 +88,7 @@ test('describePod keeps the Ralph button off, with a reason, when nothing says i
     const p = { ...manifest({ enabled: true, uiPort: 4280 }), status: { phase: 'Running' } };
     withRalphEnabled(() => {
         assert.deepEqual(describePod(p, { agentHealth: { ralph: { ui: false, reason: 'not running' } } }).ralph,
-            { ui: false, reason: 'not running', tasks: null, run: null });
+            { ui: false, reason: 'not running', tasks: null, run: null, configured: null, daemon: null });
         assert.equal(describePod(p, { agentHealth: {} }).ralph.ui, false, 'an agent that predates Ralph');
         assert.equal(describePod(p).ralph.ui, false, 'no agent answer at all');
     });
@@ -105,4 +116,43 @@ test('agent: a Ralph that serves its app instead of its API is not usable', () =
     assert.match(r.reason, /RALPH_UI_BASE_PATH/);
 
     assert.equal(ralphFromStatus(404, '{"error":"Not found"}').ui, false);
+});
+
+test('agent: reads the ralph program state from supervisorctl status', () => {
+    assert.deepEqual(
+        parseSupervisorStatus('ralph                            RUNNING   pid 812, uptime 0:04:13'),
+        { state: 'RUNNING', detail: 'pid 812, uptime 0:04:13' });
+    assert.deepEqual(
+        parseSupervisorStatus('ralph                            FATAL     Exited too quickly (process log may have details)\n'),
+        { state: 'FATAL', detail: 'Exited too quickly (process log may have details)' });
+    assert.deepEqual(
+        parseSupervisorStatus('ralph                            STOPPED   Not started'),
+        { state: 'STOPPED', detail: 'Not started' });
+    // Another program's line is not ralph's.
+    assert.equal(parseSupervisorStatus('ralphy   RUNNING   pid 1, uptime 0:00:01'), null);
+});
+
+test('agent: supervisord not saying is unknown, not stopped', () => {
+    assert.equal(parseSupervisorStatus('ralph: ERROR (no such process)'), null);
+    assert.equal(parseSupervisorStatus('unix:///var/run/supervisor.sock no such file'), null);
+    assert.equal(parseSupervisorStatus(''), null);
+    assert.equal(parseSupervisorStatus(undefined), null);
+});
+
+test('describePod passes on whether Ralph is set up and what supervisord says', () => {
+    const p = { ...manifest({ enabled: true, uiPort: 4280 }), status: { phase: 'Running' } };
+    withRalphEnabled(() => {
+        const ralph = (r) => describePod(p, { agentHealth: { ralph: r } }).ralph;
+        const fatal = ralph({
+            ui: false, reason: 'not running', configured: true,
+            daemon: { state: 'FATAL', detail: 'Exited too quickly (process log may have details)' },
+        });
+        assert.equal(fatal.configured, true);
+        assert.deepEqual(fatal.daemon, { state: 'FATAL', detail: 'Exited too quickly (process log may have details)' });
+        // Only states supervisord actually has, and only a boolean `configured`.
+        assert.equal(ralph({ ui: false, configured: false }).configured, false);
+        assert.equal(ralph({ ui: false, configured: 'yes' }).configured, null, 'only a boolean counts');
+        assert.equal(ralph({ ui: false, daemon: { state: 'ON FIRE' } }).daemon, null);
+        assert.equal(ralph({ ui: false, daemon: 'RUNNING' }).daemon, null);
+    });
 });

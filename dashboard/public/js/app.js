@@ -2,6 +2,7 @@ import { api } from './api.js';
 import { attentionStatus, barTone, escHtml, fmtCpu, fmtGi, fmtMem } from './format.js';
 import { createSessionCard, isAttention, updateSessionCard, updateSessionMetrics } from './session-card.js';
 import { createSessionForm } from './session-form.js';
+import { ralphView } from './ralph-state.mjs';
 import { setupResourceProfiles } from './resource-profiles.js';
 
 const state = { sessions: [], filter: 'all', pending: new Set(), sessionTimer: null, cards: new Map() };
@@ -47,10 +48,23 @@ function renderSessions() {
   for (const [id, card] of state.cards) if (!current.has(id)) { card.remove(); state.cards.delete(id); }
   visible.forEach((session, index) => {
     let card = state.cards.get(session.id);
-    if (!card) { card = createSessionCard(session, { onTerminate: terminateSession, onOpenTerminal: session => openUrl(session.terminalUrl || `/terminal/${encodeURIComponent(session.id)}/`), onOpenCodex: session => openUrl(session.codexUrl || `/codex/${encodeURIComponent(session.id)}/`), onOpenClaude: session => session.claudeUrl && openUrl(session.claudeUrl), onOpenRalph: session => session.ralphUrl && openUrl(session.ralphUrl) }); state.cards.set(session.id, card); }
+    if (!card) { card = createSessionCard(session, { onTerminate: terminateSession, onOpenTerminal: session => openUrl(session.terminalUrl || `/terminal/${encodeURIComponent(session.id)}/`), onOpenCodex: session => openUrl(session.codexUrl || `/codex/${encodeURIComponent(session.id)}/`), onOpenClaude: session => session.claudeUrl && openUrl(session.claudeUrl), onOpenRalph: openRalph }); state.cards.set(session.id, card); }
     else updateSessionCard(card, session);
     if (list.children[index] !== card) list.insertBefore(card, list.children[index] || null);
   });
+}
+
+// Opened at once, inside the click, so no popup blocker swallows it; while
+// the daemon comes up the page there refreshes itself until Ralph answers.
+function openRalph(session) {
+  if (!session.ralphUrl) return;
+  const { action } = ralphView(session.ralph);
+  if (!action) return;
+  openUrl(session.ralphUrl);
+  if (action !== 'start') return;
+  api.startRalph(session.id)
+    .then(() => { toast('Starting Ralph…'); loadSessions(); })
+    .catch(error => toast(`Could not start Ralph: ${error.message}`));
 }
 
 async function terminateSession(session) {

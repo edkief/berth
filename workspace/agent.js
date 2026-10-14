@@ -14,11 +14,15 @@
  *   GET /session  what this pod is working on
  *
  * With RALPH_ENABLE set, /healthz and /session also carry `ralph`: whether
- * Ralph's web UI is answering, and where its latest run stands.
+ * Ralph's web UI is answering, where its latest run stands, whether the
+ * checkout is set up for it, and what supervisord says about its daemon.
+ *
+ *   POST /ralph/start  start the supervised `ralph daemon` (202)
  */
 
 const http = require('http');
 const fs = require('fs');
+const { join } = require('path');
 const { execFileSync, execFile } = require('child_process');
 
 const PORT = Number(process.env.AGENT_PORT || 7682);
@@ -65,15 +69,26 @@ let tokenSyncError = null;
 let lastTokenSync = { at: null, adopted: false, published: false, error: null };
 let claudeUrl = null;
 
-// Ralph is started by hand from the terminal, so nothing here supervises it:
-// the agent only watches whether its web UI answers, which is all the
-// dashboard's Open Ralph button needs. Probed on a timer rather than per
-// request, so a wedged ralph can never slow a readiness answer.
+// Ralph's daemon runs headless under supervisord (`[program:ralph]`), which
+// does not autostart it: the agent starts it once per container when the
+// checkout is set up for Ralph, and whenever the dashboard asks. Everything
+// about it is probed on a timer rather than per request, so a wedged ralph or
+// supervisorctl can never slow a readiness answer.
 const RALPH_ENABLED = /^(1|true|yes|on)$/i.test(process.env.RALPH_ENABLE || '');
 const RALPH_UI_PORT = Number(process.env.RALPH_UI_PORT || 4280);
 const RALPH_UI_BASE_PATH = (process.env.RALPH_UI_BASE_PATH || '').replace(/\/+$/, '');
 const RALPH_PROBE_MS = Number(process.env.RALPH_PROBE_MS || 5000);
+// The one place the config's location is decided: relative to the checkout.
+// Its presence means "this repo uses Ralph", so the daemon autostarts.
+const RALPH_CONFIG = 'ralph.config.json';
+const RALPH_PROGRAM = 'ralph';
+const RALPH_LOG = '/var/log/supervisor/ralph.log';
+// Container layer, like READY_FILE: a restarted agent must not revive a
+// daemon the user shut down, but a restarted container autostarts again.
+const RALPH_AUTOSTARTED_FILE = `${STATE_DIR}/ralph-autostarted`;
 let ralph = { ui: false, reason: 'not checked yet', checkedAt: null };
+let ralphSetup = { configured: false, daemon: null, lastStart: null };
+let ralphStarting = false;
 
 // What `claude remote` actually prints once it has registered:
 //
@@ -551,7 +566,10 @@ function ralphFromStatus(statusCode, body) {
     };
 }
 
-function probeRalph() {
+/** Re-read whether Ralph's web UI answers; `done` runs once `ralph` is updated. */
+function probeRalph(done = () => {}) {
+    let finished = false;
+    const finish = () => { if (!finished) { finished = true; done(); } };
     const req = http.get({
         host: '127.0.0.1',
         port: RALPH_UI_PORT,
@@ -561,7 +579,7 @@ function probeRalph() {
         let body = '';
         res.setEncoding('utf8');
         res.on('data', (c) => { if (body.length < 1 << 20) body += c; });
-        res.on('end', () => { ralph = ralphFromStatus(res.statusCode, body); });
+        res.on('end', () => { ralph = ralphFromStatus(res.statusCode, body); finish(); });
     });
     req.on('timeout', () => req.destroy(new Error('timed out')));
     req.on('error', (err) => {
@@ -570,11 +588,102 @@ function probeRalph() {
             reason: err.code === 'ECONNREFUSED' ? 'not running' : `no answer (${err.code || err.message})`,
             checkedAt: new Date().toISOString(),
         };
+        finish();
     });
 }
 
 function withRalph(result) {
-    return RALPH_ENABLED ? { ...result, ralph } : result;
+    return RALPH_ENABLED ? { ...result, ralph: { ...ralph, ...ralphSetup } } : result;
+}
+
+const SUPERVISOR_STATES = new Set([
+    'STOPPED', 'STARTING', 'RUNNING', 'BACKOFF', 'STOPPING', 'EXITED', 'FATAL', 'UNKNOWN',
+]);
+
+/**
+ * One program's line of `supervisorctl status`, e.g.
+ *
+ *     ralph                            RUNNING   pid 812, uptime 0:04:13
+ *     ralph                            FATAL     Exited too quickly (process log may have details)
+ *
+ * Anything else -- `ralph: ERROR (no such process)`, a socket error -- is
+ * null: supervisord could not say, which is not the same as "stopped".
+ */
+function parseSupervisorStatus(text, program = RALPH_PROGRAM) {
+    for (const line of String(text || '').split('\n')) {
+        const m = line.match(/^(\S+)\s+([A-Z]+)(?:\s+(.*))?$/);
+        if (m && m[1] === program && SUPERVISOR_STATES.has(m[2])) {
+            return { state: m[2], detail: (m[3] || '').trim() || null };
+        }
+    }
+    return null;
+}
+
+/** supervisorctl over its root-only socket; this user has NOPASSWD sudo. */
+function supervisorctl(args, cb) {
+    execFile('sudo', ['-n', 'supervisorctl', ...args], { encoding: 'utf8', timeout: 60000 },
+        (err, stdout, stderr) => cb(err, `${stdout || ''}${stderr || ''}`.trim()));
+}
+
+function ralphConfigured() {
+    const dir = readFile(DIR_FILE);
+    return Boolean(dir) && fs.existsSync(join(dir, RALPH_CONFIG));
+}
+
+/** The supervisor half of Ralph's state; probeRalph() is the web-UI half. */
+function probeRalphDaemon() {
+    ralphSetup = { ...ralphSetup, configured: ralphConfigured() };
+    // `status` exits non-zero for any state but RUNNING, so read its output.
+    supervisorctl(['status', RALPH_PROGRAM], (_err, out) => {
+        ralphSetup = { ...ralphSetup, daemon: parseSupervisorStatus(out) };
+    });
+}
+
+/**
+ * A byobu window tailing the daemon's log, so Ralph shows up as a tab next to
+ * Claude. Visibility only: the daemon never depends on it, and closing it is
+ * harmless -- the next start opens another.
+ */
+function openRalphLogWindow() {
+    if (!tmuxSessionExists()) return;
+    const names = (sh('tmux', ['list-windows', '-t', TMUX_SESSION, '-F', '#{window_name}']) || '')
+        .split('\n');
+    if (names.includes(RALPH_PROGRAM)) return;
+    sh('tmux', [
+        'new-window', '-d', '-t', `${TMUX_SESSION}:`, '-n', RALPH_PROGRAM,
+        `sudo -n tail -n 200 -F ${RALPH_LOG}`,
+    ]);
+}
+
+// The control socket not answering yet is worth a retry; a daemon that will
+// not start is not -- supervisord has already retried it (startretries).
+const SUPERVISOR_UNREACHABLE_RE = /refused connection|no such file|SHUTDOWN_STATE/i;
+
+function startRalph(why, attempt = 1) {
+    if (ralphStarting) return;
+    ralphStarting = true;
+    openRalphLogWindow();
+    console.log(`[agent] starting ralph daemon (${why})`);
+    supervisorctl(['start', RALPH_PROGRAM], (err, out) => {
+        ralphStarting = false;
+        if (err && SUPERVISOR_UNREACHABLE_RE.test(out) && attempt < 5) {
+            setTimeout(() => startRalph(why, attempt + 1), 3000);
+            return;
+        }
+        ralphSetup = {
+            ...ralphSetup,
+            lastStart: { at: new Date().toISOString(), ok: !err || /already started/.test(out), output: tail(out, 3) },
+        };
+        if (err) console.log(`[agent] ralph start: ${out}`);
+        probeRalphDaemon();
+    });
+}
+
+/** Once per container: a checkout set up for Ralph comes up with it running. */
+function autostartRalph() {
+    if (fs.existsSync(RALPH_AUTOSTARTED_FILE) || !ralphConfigured()) return;
+    try { fs.writeFileSync(RALPH_AUTOSTARTED_FILE, new Date().toISOString()); } catch { /* best effort */ }
+    startRalph(`${RALPH_CONFIG} found`);
 }
 
 function send(res, status, body) {
@@ -609,6 +718,21 @@ function startServer() {
 
         if (path === '/session') return send(res, 200, session());
 
+        // A UI that already answers wins: a ralph someone started by hand in
+        // the terminal is left alone (the daemon would refuse to run beside
+        // it anyway), and the dashboard simply opens it.
+        if (path === '/ralph/start') {
+            if (req.method !== 'POST') return send(res, 405, { error: 'POST only' });
+            if (!RALPH_ENABLED) return send(res, 404, { error: 'Ralph is not enabled' });
+            // Probed now, not from the timer's last answer: a daemon that
+            // died seconds ago would otherwise still read as running.
+            return probeRalph(() => {
+                if (ralph.ui) return send(res, 200, { started: false, reason: 'already running' });
+                startRalph('requested by the dashboard');
+                return send(res, 202, { started: true });
+            });
+        }
+
         // Token state only -- never the token. The dashboard polls this to warn
         // before a login expires rather than after a session mysteriously dies.
         if (path === '/auth') return send(res, 200, credentials());
@@ -622,9 +746,11 @@ function startServer() {
 if (require.main === module) {
     startServer();
     if (RALPH_ENABLED) {
-        probeRalph();
-        setInterval(probeRalph, RALPH_PROBE_MS);
+        const probe = () => { probeRalph(); probeRalphDaemon(); };
+        probe();
+        setInterval(probe, RALPH_PROBE_MS);
+        autostartRalph();
     }
 }
 
-module.exports = { extractClaudeUrl, ralphFromStatus, startServer };
+module.exports = { extractClaudeUrl, ralphFromStatus, parseSupervisorStatus, startServer };

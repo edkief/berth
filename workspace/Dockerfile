@@ -61,7 +61,14 @@ ARG CODEX_APP_VERSION=0.1.91
 # package from Docker's cache.
 ARG CODEX_APP_REVISION=2
 # npm 11 blocks dependency lifecycle scripts unless explicitly allowed.
-# codexapp/node-pty need theirs to select or build the native PTY binding.
+# codexapp/node-pty need theirs to select or build the native PTY binding;
+# @opencode/cli (OpenCode V2) ships a placeholder `opencode` that its
+# postinstall swaps for the platform binary, so without it the CLI only prints
+# "postinstall script was not run". Like claude-code it is unpinned here and
+# brought to OPENCODE_VERSION by entrypoint.sh on every boot.
+# pi (@earendil-works/pi-coding-agent) is Ralph's other harness. Ralph accepts
+# only pi >=1.1.0 <2, so it is held to the 1.x line here and by PI_VERSION at
+# boot; the old @mariozechner/pi-coding-agent stops at 0.73.1 and is rejected.
 RUN curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.5/install.sh | bash \
     && test -n "$CODEX_APP_REVISION" \
     && . "$NVM_DIR/nvm.sh" \
@@ -70,8 +77,9 @@ RUN curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.5/install.sh | b
     && nvm use default \
     && npm config set @edkief:registry https://npm.kieffer.me/ \
     && npm install -g \
-        --allow-scripts=@anthropic-ai/claude-code,@edkief/codexapp,node-pty,@firebase/util,protobufjs \
-        pnpm @anthropic-ai/claude-code \
+        --allow-scripts=@anthropic-ai/claude-code,@edkief/codexapp,node-pty,@firebase/util,protobufjs,@opencode/cli \
+        pnpm @anthropic-ai/claude-code @opencode/cli \
+        "@earendil-works/pi-coding-agent@1" \
         "@openai/codex@${CODEX_CLI_VERSION}" \
         "@edkief/codexapp@${CODEX_APP_VERSION}"
 
@@ -93,7 +101,10 @@ RUN . "$NVM_DIR/nvm.sh" \
     && ln -s "$(which claude)" /usr/local/bin/claude \
     && ln -s "$(which codex)" /usr/local/bin/codex \
     && ln -s "$(which codexapp)" /usr/local/bin/codexapp \
-    && ln -s "$(which codexui)" /usr/local/bin/codexui
+    && ln -s "$(which codexui)" /usr/local/bin/codexui \
+    && ln -s "$(which opencode)" /usr/local/bin/opencode \
+    && ln -s "$(which opencode2)" /usr/local/bin/opencode2 \
+    && ln -s "$(which pi)" /usr/local/bin/pi
 RUN ln -s /home/ubuntu/.cargo/bin/cargo     /usr/local/bin/cargo \
     && ln -s /home/ubuntu/.cargo/bin/rustc  /usr/local/bin/rustc \
     && ln -s /home/ubuntu/.cargo/bin/rustup /usr/local/bin/rustup \
@@ -102,22 +113,33 @@ RUN ln -s /home/ubuntu/.cargo/bin/cargo     /usr/local/bin/cargo \
 # Playwright: the CLI/library (as ubuntu) plus the MCP server so Claude can drive
 # a browser for testing, and the Chromium browser + its OS deps installed to a
 # shared, container-wide path (as root) so every process can find them.
+# @playwright/cli (`playwright-cli`) is the same for agents without MCP: Ralph
+# has pi check a screen with it, and `ralph doctor` warns when it is missing.
 USER ubuntu
 RUN . "$NVM_DIR/nvm.sh" \
-    && npm install -g playwright @playwright/mcp
+    && npm install -g playwright @playwright/mcp @playwright/cli
 USER root
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
+# playwright-cli otherwise launches the *branded* Chrome channel, which is not
+# installed here; chromium is the browser installed below. It reads the MCP
+# server's config variables, and the MCP server is already run with
+# --browser chromium, so this changes nothing for it.
+ENV PLAYWRIGHT_MCP_BROWSER=chromium
 # Browsers are installed through *each* package's own playwright-core, because
-# `playwright` and `@playwright/mcp` pin different revisions and each will only
-# launch the one it pinned. Running just the `playwright` CLI here left the MCP
-# server with chromium-1234 when its bundled core wanted 1243, so every
-# browser_navigate failed with "Executable doesn't exist" long after the server
-# itself had started fine. --with-deps once (as root) covers the OS packages for
-# both; the second install only fetches the browser.
+# `playwright`, `@playwright/mcp` and `@playwright/cli` pin different revisions
+# and each will only launch the one it pinned. Running just the `playwright` CLI
+# here left the MCP server with chromium-1234 when its bundled core wanted 1243,
+# so every browser_navigate failed with "Executable doesn't exist" long after
+# the server itself had started fine. --with-deps once (as root) covers the OS
+# packages for all three; the other installs only fetch their browser.
+# playwright-cli is linked for the same reason as ralph below: the Ralph daemon
+# runs under supervisord, with no nvm on its PATH.
 RUN . "$NVM_DIR/nvm.sh" \
     && apt-get update \
     && playwright install --with-deps chromium \
     && node "$(npm root -g)/@playwright/mcp/node_modules/playwright-core/cli.js" install chromium \
+    && node "$(npm root -g)/@playwright/cli/node_modules/playwright-core/cli.js" install chromium \
+    && ln -sf "$(which playwright-cli)" /usr/local/bin/playwright-cli \
     && rm -rf /var/lib/apt/lists/*
 
 USER ubuntu

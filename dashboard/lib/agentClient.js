@@ -6,9 +6,18 @@ const AGENT_PORT = 7682;
 
 /** Small JSON GET against a workspace pod's in-pod agent. */
 function agentGet(ip, path, timeoutMs = 2000) {
+    return agentRequest(ip, path, 'GET', timeoutMs);
+}
+
+/** A bodiless POST: the agent's actions take no input. */
+function agentPost(ip, path, timeoutMs = 5000) {
+    return agentRequest(ip, path, 'POST', timeoutMs);
+}
+
+function agentRequest(ip, path, method, timeoutMs) {
     return new Promise((resolve) => {
         const req = http.request(
-            { host: ip, port: AGENT_PORT, path, method: 'GET', timeout: timeoutMs },
+            { host: ip, port: AGENT_PORT, path, method, timeout: timeoutMs },
             (res) => {
                 let body = '';
                 res.setEncoding('utf8');
@@ -75,4 +84,4 @@ function healthEnvelope({ podIP, probe }) {
     return { available: true, podIP, probeStatus: probe.status, health: probe.body };
 }
 
-module.exports = { agentGet, health, disk, healthEnvelope, AGENT_PORT };
+module.exports = { agentGet, agentPost, health, disk, healthEnvelope, AGENT_PORT };

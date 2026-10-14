@@ -56,6 +56,8 @@ test('dashboard/.env.example defaults match the code defaults', () => {
         WORKSPACE_IMAGE: cfg.workspaceImage,
         WORKSPACE_IMAGE_PULL_POLICY: cfg.imagePullPolicy,
         CLAUDE_CODE_VERSION: cfg.claudeCodeVersion,
+        OPENCODE_VERSION: cfg.opencodeVersion,
+        PI_VERSION: cfg.piVersion,
         WORKSPACE_STORAGE_CLASS: cfg.storageClass,
         WORKSPACE_STORAGE_SIZE: cfg.storageSize,
         WORKSPACE_CPU_REQUEST: cfg.workspaceResources.requests.cpu,
