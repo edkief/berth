@@ -566,7 +566,10 @@ function ralphFromStatus(statusCode, body) {
     };
 }
 
-function probeRalph() {
+/** Re-read whether Ralph's web UI answers; `done` runs once `ralph` is updated. */
+function probeRalph(done = () => {}) {
+    let finished = false;
+    const finish = () => { if (!finished) { finished = true; done(); } };
     const req = http.get({
         host: '127.0.0.1',
         port: RALPH_UI_PORT,
@@ -576,7 +579,7 @@ function probeRalph() {
         let body = '';
         res.setEncoding('utf8');
         res.on('data', (c) => { if (body.length < 1 << 20) body += c; });
-        res.on('end', () => { ralph = ralphFromStatus(res.statusCode, body); });
+        res.on('end', () => { ralph = ralphFromStatus(res.statusCode, body); finish(); });
     });
     req.on('timeout', () => req.destroy(new Error('timed out')));
     req.on('error', (err) => {
@@ -585,6 +588,7 @@ function probeRalph() {
             reason: err.code === 'ECONNREFUSED' ? 'not running' : `no answer (${err.code || err.message})`,
             checkedAt: new Date().toISOString(),
         };
+        finish();
     });
 }
 
@@ -720,9 +724,13 @@ function startServer() {
         if (path === '/ralph/start') {
             if (req.method !== 'POST') return send(res, 405, { error: 'POST only' });
             if (!RALPH_ENABLED) return send(res, 404, { error: 'Ralph is not enabled' });
-            if (ralph.ui) return send(res, 200, { started: false, reason: 'already running' });
-            startRalph('requested by the dashboard');
-            return send(res, 202, { started: true });
+            // Probed now, not from the timer's last answer: a daemon that
+            // died seconds ago would otherwise still read as running.
+            return probeRalph(() => {
+                if (ralph.ui) return send(res, 200, { started: false, reason: 'already running' });
+                startRalph('requested by the dashboard');
+                return send(res, 202, { started: true });
+            });
         }
 
         // Token state only -- never the token. The dashboard polls this to warn
