@@ -5,6 +5,11 @@ const assert = require('node:assert');
 
 process.env.NAMESPACE = 'dev';
 process.env.KUBERNETES_SERVICE_HOST = '';
+// These tests also run inside Berth workspaces, whose pods export RALPH_ENABLE
+// and friends; read the code's defaults, not the environment's.
+for (const name of Object.keys(process.env)) {
+    if (name.startsWith('RALPH_')) delete process.env[name];
+}
 
 const cfg = require('../lib/config');
 const { describePod } = require('../lib/sessions');
