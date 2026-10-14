@@ -43,7 +43,7 @@ Browser
                         │ berth-workspace pod (one per repo)     │
                         │   :7681 ttyd     → byobu → claude remote│
                         │   :7684 codexapp → codex app-server    │
-                        │   :4280 ralph UI (only while it runs)  │
+                        │   :4280 ralph daemon (opt-in) → UI     │
                         │   :7682 agent    → /healthz /disk      │
                         │   :5432 postgres (scratch)             │
                         │   /workspace ← per-repo PVC             │
@@ -70,14 +70,15 @@ which is the reason this design replaced the previous single-pod one.
 | `dashboard/lib/metrics.js` | `metrics.k8s.io` with graceful degradation |
 | `dashboard/lib/tokenRefresh.js` | Renews the shared login and publishes it |
 | `dashboard/lib/ttyProxy.js` (`CODEX_PORT`) | Also resolves and proxies the Codex UI target |
-| `server.js` `/ralph/:id` + `agent.js` `probeRalph()` | Opt-in Ralph web UI proxy, and the probe that enables its button |
+| `server.js` `/ralph/:id` + `agent.js` `probeRalph()` | Opt-in Ralph web UI proxy, and the probe that drives its button |
+| `dashboard/public/js/ralph-state.mjs` | `ralphView()` — the Ralph button's state, dot and action; pure, unit-tested |
 | `dashboard/prune-pvcs.js` | PVC pruner, run by a CronJob |
 | `dashboard/public/index.html` | Single-file dashboard UI, no build step |
 | `dashboard/public/landing.html` + `styles/landing.css` | The Berth marketing page served at `/welcome` |
 | `dashboard/public/terminal.html` + `js/terminal-*.mjs` | Same-origin ttyd wrapper with mobile shortcut drawer |
 | `workspace/entrypoint.sh` | Bootstrap: secrets → config pull → clone → seed → supervisord |
 | `workspace/agent.js` | In-pod health/disk endpoint (this is why we need no `pods/exec`); also discovers the live Claude Remote URL from the pane |
-| `workspace/supervisord.conf` | Runs ttyd, `codexapp` (Codex UI), the agent and Postgres |
+| `workspace/supervisord.conf` | Runs ttyd, `codexapp` (Codex UI), the agent and Postgres; holds Ralph's daemon, which the agent starts |
 | `workspace/bootstrap/clone.sh` | Clone/refresh into `/workspace/<branch-slug>` |
 | `shared/claude-config-sync/` | S3 sync CLI, copied into **both** images |
 | `k8s/dashboard.yaml` | SA, Role, RoleBinding, PVC, ResourceQuota, Deployment, Service, Ingress |
@@ -109,7 +110,8 @@ which is the reason this design replaced the previous single-pod one.
    is fine. Matching on the session name, not on "any claude", keeps a user's
    own second `claude` from holding the pod ready.
 7. Nothing supervises claude: `entrypoint.sh` types it into the tmux pane, and
-   supervisord runs only ttyd, the agent and Postgres. So the agent self-heals —
+   supervisord runs only ttyd, codexapp, the agent and Postgres (plus Ralph's
+   daemon when enabled, see below). So the agent self-heals —
    see below.
 
 `POST /api/sessions/:id/activate` **no longer exists**, and must not come back:
@@ -244,7 +246,8 @@ alternatives that were rejected, not current status).
 ## Ralph (opt-in)
 
 [Ralph](https://github.com/edkief/ralph) (`@edkief/ralph`, from the private
-`npm.kieffer.me` registry) is an agent loop driven from the terminal. It is
+`npm.kieffer.me` registry) is an agent loop. In a workspace it runs as
+`ralph daemon`, supervised, with its web UI proxied at `/ralph/<id>/`. It is
 off unless the dashboard has `RALPH_ENABLE=1`, and takes effect only for
 workspaces started afterwards.
 
@@ -255,22 +258,68 @@ workspaces started afterwards.
   a timeout so a hung registry cannot hold the workspace at *starting*.
   `/usr/local/bin/ralph` is linked even when the image install failed; it
   dangles until a boot install fills it.
-- **Nothing starts it.** The user runs `ralph` in the terminal. The pod env
-  (`podTemplate.js` `ralphEnv()`) is read by ralph itself: `RALPH_UI=1` serves
-  the web UI beside every loop, on `0.0.0.0:$RALPH_UI_PORT` (default 4280,
-  Ralph's own) so the dashboard can reach the pod IP, under
-  `RALPH_UI_BASE_PATH=/ralph/<id>`. `ralph ui` serves it alone, for past runs.
+- **Its harnesses ship in the image**: OpenCode V2 (its default) and pi
+  (`@earendil-works/pi-coding-agent`), both under *Bundled workspace tooling*.
+  Without a usable one the daemon exits 5 and ends `FATAL`.
+- **supervisord runs the daemon, headless.** `[program:ralph]` is
+  `ralph daemon` in the checkout, `autostart=false`, and the agent decides
+  when to start it (over supervisord's root-only socket, `sudo -n
+  supervisorctl`: no `pods/exec`). Its rules are the point:
+  `autorestart=unexpected` + `exitcodes=0`, so a deliberate shutdown
+  (`ralph daemon shutdown`, or *Stop* in its UI) **stays down** while a crash
+  is restarted; `startsecs`/`startretries` make a daemon that cannot start go
+  `FATAL` after three tries instead of looping; TERM is Ralph's own clean
+  shutdown. Not running it inside tmux is deliberate — the daemon takes no
+  keyboard input, and supervising a tmux pane needs a fragile wait-for bridge.
+  For visibility, starting it opens a byobu window `ralph` that tails
+  `/var/log/supervisor/ralph.log`; closing that tab never touches the daemon.
+- **When it starts.** A checkout with **`ralph.config.json` at its root** is
+  set up for Ralph (`RALPH_CONFIG` in `agent.js`, the one place that path is
+  decided): the agent starts the daemon **once per container**, recorded in
+  `$WORKSPACE_STATE_DIR/ralph-autostarted`. That marker is on the container
+  layer, so a restarted agent never revives a daemon the user shut down, but a
+  restarted container autostarts again. Otherwise it starts only when asked:
+  `POST /api/sessions/:id/ralph/start` → the agent's `POST /ralph/start`.
+- **Setting a repo up is planning in Ralph's UI, not `ralph init`.** The
+  daemon runs in an unconfigured checkout, and its **Plan** tab scaffolds
+  `.ralph/` and `ralph.config.json` before the interview; the plan commit
+  includes them, so the next boot autostarts. A daemon started and never
+  planned leaves nothing behind.
+- **Actions through the proxy need `RALPH_UI_ACTIONS=open`.** Off loopback,
+  Ralph refuses Plan, Run, Pause and answers otherwise. The ingress auth in
+  front of the dashboard is the boundary, as for the terminal.
+- **A UI that answers always wins.** A `ralph` started by hand in the
+  terminal is not adopted into supervisord (the supervised daemon would refuse
+  to run beside it, and goes `FATAL`): the agent declines to start anything
+  while a UI answers — probing it *live*, since the timer's last answer lags
+  by up to `RALPH_PROBE_MS` — and the card simply opens it.
+- The pod env (`podTemplate.js` `ralphEnv()`) is read by ralph itself, daemon
+  or hand-run: the UI on `0.0.0.0:$RALPH_UI_PORT` (default 4280, Ralph's own)
+  so the dashboard can reach the pod IP, under `RALPH_UI_BASE_PATH=/ralph/<id>`;
+  `RALPH_UI=1` makes a hand-run loop serve it too.
 - **Proxy rewrites nothing**, as for ttyd and codexapp: ralph strips its base
   path and its app's URLs are relative. A ralph without base-path support
   serves `index.html` for every path, which would load and then call its API
   on the dashboard's root — so the agent treats a non-JSON `/api/status` as
   *not usable*, not as up.
-- **The button follows a probe, not the pod.** The agent GETs
-  `$RALPH_UI_BASE_PATH/api/status` on loopback every `RALPH_PROBE_MS` (5 s),
-  off the request path, and reports `ralph` in `/healthz`; the sessions list
-  re-reads `/healthz` on every poll. *Ralph* in the launch group shows only when the dashboard
-  has it enabled **and** the pod has a `ralph-ui` port, and is enabled only
-  while the UI answers; its tooltip carries the run status or the reason.
+- **The button follows probes, not the pod.** Every `RALPH_PROBE_MS` (5 s),
+  off the request path, the agent GETs `$RALPH_UI_BASE_PATH/api/status` on
+  loopback and reads `supervisorctl status ralph`, and reports `ralph` in
+  `/healthz` (`ui`, `configured`, `daemon`, `lastStart`); the sessions list
+  re-reads `/healthz` on every poll. *Ralph* shows only when the dashboard has
+  it enabled **and** the pod has a `ralph-ui` port. `ralphView()` turns that
+  into one of five states, each its own dot:
+
+  | state | when | dot | click |
+  |---|---|---|---|
+  | `running` | the UI answers (supervised or hand-run) | filled | open |
+  | `starting` | supervisord says STARTING/BACKOFF, or RUNNING before the UI is up | pulsing | open (the page waits) |
+  | `stopped` | configured, but STOPPED/EXITED/FATAL | ring | start + open |
+  | `unset` | no `ralph.config.json`, nothing running | dashed ring, *Set up Ralph* | start + open |
+  | `unknown` | agent unreachable, or too old to report setup (`configured: null`) | hollow, disabled | — |
+
+  The click opens the UI synchronously, inside the gesture, so no popup
+  blocker eats it; the proxy's not-running page refreshes until Ralph answers.
   Ralph never affects readiness or liveness.
 - `RALPH_UI_PORT` is also in `k8s/networkpolicy.yaml`; change both together.
 
@@ -523,6 +572,7 @@ narrow TOCTOU window remains.)
 | `POST` | `/api/sessions/:id/restart` | 202 |
 | `GET` | `/api/sessions/:id/logs?tail=N` | `text/plain`; the UI polls this into a per-card panel |
 | `GET` | `/api/sessions/:id/health` | The in-pod agent's `/healthz`, verbatim; always **200**, since "no answer" is a result to render |
+| `POST` | `/api/sessions/:id/ralph/start` | Start the supervised Ralph daemon via the agent: **202**, or 200 if a Ralph UI already answers; 404 unless Ralph is enabled for the pod, 409 without a pod IP, 502 if the agent fails |
 | `GET` | `/api/workspaces` · `DELETE /api/workspaces/:name` · `POST /api/workspaces/prune` | PVC view |
 | `GET` | `/api/resources` | metrics-server, or `{source:"unavailable"}` with **200** |
 | `GET` | `/api/disk` | Per-PVC; live via the agent, else the `last-used-bytes` annotation |
@@ -531,7 +581,7 @@ narrow TOCTOU window remains.)
 | `POST` | `/api/config/token/refresh` | Run a maintenance pass now; `?force=1` renews even when not due |
 | `GET` | `/terminal/:id/` | User-facing ttyd wrapper with mobile shortcut and function-key drawer; `:id` is a workspace or `config` for the shared-config shell |
 | `ALL` | `/tty/:id/*`, `/codex/:id/*`, `/config-tty/*` | Proxied (incl. WebSocket upgrade) |
-| `GET` | `/ralph/:id/*` | Ralph's web UI, proxied; 404 unless `RALPH_ENABLE`, a how-to-start page while it isn't running |
+| `GET` | `/ralph/:id/*` | Ralph's web UI, proxied; 404 unless `RALPH_ENABLE`, a self-refreshing *not running yet* page until it answers |
 | `GET` | `/welcome` | The Berth landing page (`landing.html`); everything else falls through to the dashboard SPA |
 
 ## Kubernetes
@@ -649,6 +699,15 @@ postinstall is what puts the real binary in place, so every install needs
 program, proxy route or readiness gate. Its state (`~/.local/share/opencode`,
 `~/.config/opencode`) is on the container layer, so an OpenCode login does not
 survive a pod restart.
+
+pi is `@earendil-works/pi-coding-agent` (bin `pi`), Ralph's other harness —
+**not** `@mariozechner/pi-coding-agent`, its deprecated predecessor frozen at
+0.73.1, which Ralph rejects. Ralph accepts only `>=1.1.0 <2`, so pi is held to
+the 1.x line rather than `latest`: the Dockerfile installs `@1`, and
+`entrypoint.sh` reinstalls `PI_VERSION` (dashboard setting, default `1`, an npm
+range or version) on every boot unless the installed version equals it. It
+has no install scripts. Like OpenCode it is a terminal tool, and its model
+config (`~/.pi/agent/models.json`) is on the container layer.
 
 ## Postgres
 
