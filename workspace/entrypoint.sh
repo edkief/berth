@@ -173,11 +173,12 @@ if [ -s "$PGDATA/PG_VERSION" ]; then
 fi
 
 # -------------------------------------------------------------- claude code
+# Its postinstall places the real binary, so npm 11 must be told to run it.
 CLAUDE_CODE_VERSION="${CLAUDE_CODE_VERSION:-latest}"
 if command -v npm >/dev/null 2>&1; then
     CURRENT_VERSION="$(claude --version 2>/dev/null | awk '{print $1}' || true)"
     if [ "$CLAUDE_CODE_VERSION" = "latest" ] || [ "$CURRENT_VERSION" != "$CLAUDE_CODE_VERSION" ]; then
-        npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
+        npm install -g --allow-scripts=@anthropic-ai/claude-code "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
             || echo "[entrypoint] WARN: claude-code install failed, keeping ${CURRENT_VERSION:-unknown}"
     fi
 fi
@@ -199,11 +200,13 @@ fi
 # Ralph's other harness. PI_VERSION is an npm range or version, default `1`:
 # Ralph accepts only pi >=1.1.0 <2, so `latest` would let pi 2 break it. Read
 # from package.json, which is stable where `pi --version`'s output may not be.
+# Two of its dependencies carry install scripts (@google/genai, protobufjs).
 PI_VERSION="${PI_VERSION:-1}"
 if command -v npm >/dev/null 2>&1; then
     CURRENT_VERSION="$(node -p "require('$(npm root -g)/@earendil-works/pi-coding-agent/package.json').version" 2>/dev/null || true)"
     if [ "$CURRENT_VERSION" != "$PI_VERSION" ]; then
-        npm install -g "@earendil-works/pi-coding-agent@${PI_VERSION}" >/dev/null \
+        npm install -g --allow-scripts=@google/genai,protobufjs \
+            "@earendil-works/pi-coding-agent@${PI_VERSION}" >/dev/null \
             || echo "[entrypoint] WARN: pi install failed, keeping ${CURRENT_VERSION:-unknown}"
     fi
 fi

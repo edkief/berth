@@ -710,8 +710,17 @@ pi is `@earendil-works/pi-coding-agent` (bin `pi`), Ralph's other harness —
 0.73.1, which Ralph rejects. Ralph accepts only `>=1.1.0 <2`, so pi is held to
 the 1.x line rather than `latest`: the Dockerfile installs `@1`, and
 `entrypoint.sh` reinstalls `PI_VERSION` (dashboard setting, default `1`, an npm
-range or version) on every boot unless the installed version equals it. It
-has no install scripts. Like OpenCode it is a terminal tool.
+range or version) on every boot unless the installed version equals it. pi
+itself has no install scripts, but two of its dependencies do (`@google/genai`,
+`protobufjs`). Like OpenCode it is a terminal tool.
+
+**npm 11 runs no install script it was not told to.** A package missing from
+`--allow-scripts` only warns (`install-scripts not yet covered by
+allowScripts`) and installs without it, which for claude-code and OpenCode
+means a placeholder in place of the real binary. Every global install, at build
+and at boot, therefore passes its own allowlist, and the build and boot lists
+must cover the same packages: `@anthropic-ai/claude-code`, `@opencode/cli`,
+and pi's `@google/genai,protobufjs`. Ralph's tree has none.
 
 **Their logins live on the PVC**, like `CODEX_HOME`: `$HOME` is the container
 layer, so otherwise every container restart logged both out and the
