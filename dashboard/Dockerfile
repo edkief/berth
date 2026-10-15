@@ -26,7 +26,7 @@ RUN curl -fsSL -o /tmp/rclone.zip https://downloads.rclone.org/rclone-current-li
     && chmod +x /usr/local/bin/rclone \
     && rm -f /tmp/rclone.zip
 
-RUN npm install -g @anthropic-ai/claude-code@latest \
+RUN npm install -g --allow-scripts=@anthropic-ai/claude-code @anthropic-ai/claude-code@latest \
     && npm cache clean --force
 
 COPY shared/claude-config-sync/claude-config-sync /usr/local/bin/claude-config-sync
