@@ -77,7 +77,7 @@ RUN curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.5/install.sh | b
     && nvm use default \
     && npm config set @edkief:registry https://npm.kieffer.me/ \
     && npm install -g \
-        --allow-scripts=@anthropic-ai/claude-code,@edkief/codexapp,node-pty,@firebase/util,protobufjs,@opencode/cli \
+        --allow-scripts=@anthropic-ai/claude-code,@edkief/codexapp,node-pty,@firebase/util,protobufjs,@google/genai,@opencode/cli \
         pnpm @anthropic-ai/claude-code @opencode/cli \
         "@earendil-works/pi-coding-agent@1" \
         "@openai/codex@${CODEX_CLI_VERSION}" \
