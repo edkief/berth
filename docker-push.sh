@@ -33,12 +33,12 @@ DEFAULT_BRANCH="${DEFAULT_BRANCH:-main}"
 TARGETS=()
 ROLLOUT=false
 FORCE_LATEST=false
-NO_CACHE=
+NO_CACHE=()
 for arg in "$@"; do
     case "$arg" in
         --rollout) ROLLOUT=true ;;
         --latest) FORCE_LATEST=true ;;
-	--no-cache) NO_CACHE="--no-cache" ;;
+        --no-cache) NO_CACHE=("--no-cache") ;;
         dashboard|workspace) TARGETS+=("$arg") ;;
         *) echo "usage: $0 [dashboard|workspace] [--rollout] [--latest] [--no-cache]" >&2; exit 2 ;;
     esac
@@ -74,7 +74,7 @@ for target in "${TARGETS[@]}"; do
     if [ "$TAG_LATEST" = true ]; then args+=(-t "${IMAGE}:latest"); fi
 
     # Context is the repo root so both images can COPY shared/claude-config-sync.
-    docker build -f "${ROOT}/${target}/Dockerfile" "$NO_CACHE"  "${args[@]}" "$ROOT"
+    docker build -f "${ROOT}/${target}/Dockerfile" "${NO_CACHE[@]}" "${args[@]}" "$ROOT"
 
     docker push "${IMAGE}:${TAG_HASH}"
     docker push "${IMAGE}:${TAG_BRANCH}"
