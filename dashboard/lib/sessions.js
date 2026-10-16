@@ -5,7 +5,9 @@ const k8s = require('./k8s');
 const pvcs = require('./pvcs');
 const { workspaceKey, repoFullName } = require('./workspaceKey');
 const { workspaceId, sessionName: buildSessionName } = require('./naming');
-const { buildWorkspacePodManifest, ANN } = require('./podTemplate');
+const {
+    buildWorkspacePodManifest, ANN, workspaceContainer, workspaceContainerStatus,
+} = require('./podTemplate');
 const { validateRepoUrl, validateBranch, validateOptionalBranch } = require('./validate');
 const agent = require('./agentClient');
 const resourceProfiles = require('./resourceProfiles');
@@ -42,7 +44,7 @@ function deriveStatus(pod) {
     const phase = pod.status?.phase;
     if (phase === 'Failed' || phase === 'Succeeded') return 'failed';
 
-    const cs = (pod.status?.containerStatuses || [])[0];
+    const cs = workspaceContainerStatus(pod);
 
     if (phase === 'Pending') {
         const waiting = cs?.state?.waiting?.reason;
@@ -63,7 +65,7 @@ function deriveStatus(pod) {
 }
 
 function podReason(pod) {
-    const cs = (pod.status?.containerStatuses || [])[0];
+    const cs = workspaceContainerStatus(pod);
     const waiting = cs?.state?.waiting;
     if (waiting?.reason) return waiting.reason;
     if (pod.status?.reason) return pod.status.reason;
@@ -74,7 +76,7 @@ function podReason(pod) {
 }
 
 function limitsFromPod(pod) {
-    const limits = pod.spec?.containers?.[0]?.resources?.limits || {};
+    const limits = workspaceContainer(pod)?.resources?.limits || {};
     return {
         cpuMillicores: parseCpuLimit(limits.cpu),
         memMiB: parseMemLimit(limits.memory),
@@ -103,7 +105,7 @@ function describePod(pod, { agentHealth = null, warning = null } = {}) {
     // The agent's verdict overrides a merely-Pending-looking pod: it is the
     // only thing that can see a claude that failed to start.
     if (status === 'starting' && FATAL_STAGES.has(agentHealth?.stage)) status = 'failed';
-    const cs = (pod.status?.containerStatuses || [])[0];
+    const cs = workspaceContainerStatus(pod);
     const branch = ann[ANN.branch] || 'unknown';
     const repo = ann[ANN.repoFullName] || 'unknown';
 
@@ -173,7 +175,7 @@ function describePod(pod, { agentHealth = null, warning = null } = {}) {
  * no port for it -- so both have to agree before the card offers it.
  */
 function ralphAvailable(pod) {
-    return cfg.ralph.enabled && (pod.spec?.containers?.[0]?.ports || [])
+    return cfg.ralph.enabled && (workspaceContainer(pod)?.ports || [])
         .some((p) => p.name === 'ralph-ui');
 }
 
@@ -405,7 +407,7 @@ async function restartSession(id) {
         resourceProfile: ann[ANN.resourceProfile] || 'legacy',
         // A restart must not silently resize a workspace if its profile was
         // edited or deleted after this pod was created.
-        resources: pod.spec?.containers?.[0]?.resources || cfg.workspaceResources,
+        resources: workspaceContainer(pod)?.resources || cfg.workspaceResources,
     }));
     sessionsCache.invalidate();
     return describePod(created);

@@ -9,6 +9,14 @@ const LABEL = {
     branch: 'berth.kieffer.me/branch',
 };
 
+/**
+ * The container that runs claude. Every status, limit and port the dashboard
+ * reports comes from this one: the Pod also carries sidecars, and the kubelet
+ * orders `status.containerStatuses` by name, not spec order, so index 0 is not
+ * it once a sidecar sorts first ("files" < "workspace").
+ */
+const WORKSPACE_CONTAINER = 'workspace';
+
 const ANN = {
     repoUrl: 'berth.kieffer.me/repo-url',
     repoFullName: 'berth.kieffer.me/repo-full-name',
@@ -83,7 +91,7 @@ function buildWorkspacePodManifest({
                 fsGroupChangePolicy: 'OnRootMismatch',
             },
             containers: [{
-                name: 'workspace',
+                name: WORKSPACE_CONTAINER,
                 image: cfg.workspaceImage,
                 imagePullPolicy: cfg.imagePullPolicy,
                 ports: [
@@ -195,4 +203,20 @@ function ralphEnv(id, ralph) {
     ];
 }
 
-module.exports = { buildWorkspacePodManifest, LABEL, ANN };
+/** Falls back to the first entry for a pod whose containers were never named. */
+function byWorkspaceName(list) {
+    return list.find((c) => c.name === WORKSPACE_CONTAINER) || list[0];
+}
+
+function workspaceContainer(pod) {
+    return byWorkspaceName(pod?.spec?.containers || []);
+}
+
+function workspaceContainerStatus(pod) {
+    return byWorkspaceName(pod?.status?.containerStatuses || []);
+}
+
+module.exports = {
+    buildWorkspacePodManifest, LABEL, ANN,
+    WORKSPACE_CONTAINER, workspaceContainer, workspaceContainerStatus,
+};

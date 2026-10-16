@@ -357,3 +357,43 @@ test('a real probe is passed through untouched, status included', () => {
     // dashboard reshapes here is a field the panel silently stops showing.
     assert.deepEqual(env.health, body);
 });
+
+// The kubelet orders containerStatuses by name, so a sidecar named "files"
+// is listed before "workspace". Everything the card reports must still be
+// about the workspace container.
+test('describePod reads the workspace container by name, not by index', () => {
+    const p = pod({
+        status: {
+            phase: 'Pending',
+            containerStatuses: [
+                { name: 'files', restartCount: 7, state: { running: {} } },
+                { name: 'workspace', restartCount: 1, state: { waiting: { reason: 'ErrImagePull' } } },
+            ],
+        },
+    });
+    p.spec.containers = [
+        { name: 'workspace', resources: { limits: { cpu: '2', memory: '4Gi' } } },
+        { name: 'files', resources: { limits: { cpu: '500m', memory: '256Mi' } } },
+    ];
+    p.spec.containers.reverse();
+
+    const s = describePod(p);
+    assert.equal(s.status, 'failed');
+    assert.equal(s.reason, 'ErrImagePull');
+    assert.equal(s.restartCount, 1);
+    assert.deepEqual(s.limits, { cpuMillicores: 2000, memMiB: 4096 });
+});
+
+test('metrics count only the workspace container against its limit', () => {
+    const { workspaceUsage } = require('../lib/metrics');
+    assert.deepEqual(workspaceUsage({
+        containers: [
+            { name: 'files', usage: { cpu: '100m', memory: '100Mi' } },
+            { name: 'workspace', usage: { cpu: '250m', memory: '1Gi' } },
+        ],
+    }), { cpu: 250, mem: 1024 });
+    // Unnamed (or pre-sidecar) pods fall back to the whole pod.
+    assert.deepEqual(workspaceUsage({
+        containers: [{ name: 'other', usage: { cpu: '10m', memory: '1Mi' } }],
+    }), { cpu: 10, mem: 1 });
+});
