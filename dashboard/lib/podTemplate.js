@@ -16,6 +16,8 @@ const LABEL = {
  * it once a sidecar sorts first ("files" < "workspace").
  */
 const WORKSPACE_CONTAINER = 'workspace';
+const FILES_CONTAINER = 'files';
+const FILES_PORT = 7685;
 
 const ANN = {
     repoUrl: 'berth.kieffer.me/repo-url',
@@ -42,7 +44,7 @@ function buildWorkspacePodManifest({
     id, key, repoUrl, repoFullName, branch, baseBranch,
     newBranch = null, sessionName, pvcName, resetHard = false,
     resourceProfile = 'default', resources = cfg.workspaceResources,
-    ralph = cfg.ralph,
+    ralph = cfg.ralph, files = cfg.files,
 }) {
     const branchSlug = slug(branch, 40);
 
@@ -171,10 +173,11 @@ function buildWorkspacePodManifest({
                     periodSeconds: 30,
                     failureThreshold: 4,
                 },
-            }],
+            }, ...(files.enabled ? [filesContainer(id, files)] : [])],
             volumes: [
                 { name: 'ws', persistentVolumeClaim: { claimName: pvcName } },
                 { name: 'github-ssh', secret: { secretName: cfg.githubSecretName, defaultMode: 0o400 } },
+                ...(files.enabled ? [{ name: 'files-db', emptyDir: { sizeLimit: '256Mi' } }] : []),
             ],
         },
     };
@@ -203,6 +206,62 @@ function ralphEnv(id, ralph) {
     ];
 }
 
+/**
+ * filebrowser over the whole repo PVC, as its own container rather than a
+ * supervisord program in the workspace: a runaway agent that OOMs the
+ * workspace container is exactly when you want to get at its files, and a
+ * sidecar keeps its own memory limit and restarts on its own.
+ *
+ * A regular container, not a native sidecar (an init container with
+ * restartPolicy Always): a native sidecar must start before the workspace
+ * does, so a failed pull of this image would hold every workspace at
+ * PodInitializing. No readiness probe either -- pod readiness is the
+ * workspace's status in the UI, and the dashboard probes /health itself
+ * before proxying.
+ *
+ * --noauth: the ingress auth plus the NetworkPolicy are the boundary, as for
+ * ttyd and codexapp. --baseURL means the proxy rewrites nothing. The command
+ * replaces the image's init script, which would write its own config and
+ * database paths; the database (users, settings) is throwaway and lives on
+ * an emptyDir, so quick setup runs fresh in every pod.
+ */
+function filesContainer(id, files) {
+    return {
+        name: FILES_CONTAINER,
+        image: files.image,
+        imagePullPolicy: 'IfNotPresent',
+        command: ['filebrowser'],
+        args: [
+            '--noauth',
+            '--root', '/workspace',
+            '--baseURL', `/files/${id}`,
+            '--address', '0.0.0.0',
+            '--port', String(FILES_PORT),
+            '--database', '/database/filebrowser.db',
+            '--disableExec',
+        ],
+        ports: [{ containerPort: FILES_PORT, name: 'files' }],
+        // Fixed rather than profile-driven: these are filebrowser's needs, not
+        // the workspace's. The memory limit bounds a large zip download.
+        resources: {
+            requests: { cpu: '10m', memory: '32Mi' },
+            limits: { cpu: '500m', memory: '256Mi' },
+        },
+        // Runs as the pod's uid 1000, so what it writes is owned by `ubuntu`.
+        securityContext: {
+            allowPrivilegeEscalation: false,
+            readOnlyRootFilesystem: true,
+            capabilities: { drop: ['ALL'] },
+        },
+        volumeMounts: [
+            { name: 'ws', mountPath: '/workspace' },
+            { name: 'files-db', mountPath: '/database', subPath: 'database' },
+            // The root filesystem is read-only; give Go's temp dir somewhere.
+            { name: 'files-db', mountPath: '/tmp', subPath: 'tmp' },
+        ],
+    };
+}
+
 /** Falls back to the first entry for a pod whose containers were never named. */
 function byWorkspaceName(list) {
     return list.find((c) => c.name === WORKSPACE_CONTAINER) || list[0];
@@ -219,4 +278,5 @@ function workspaceContainerStatus(pod) {
 module.exports = {
     buildWorkspacePodManifest, LABEL, ANN,
     WORKSPACE_CONTAINER, workspaceContainer, workspaceContainerStatus,
+    FILES_CONTAINER, FILES_PORT,
 };

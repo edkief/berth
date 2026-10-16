@@ -6,7 +6,7 @@ const pvcs = require('./pvcs');
 const { workspaceKey, repoFullName } = require('./workspaceKey');
 const { workspaceId, sessionName: buildSessionName } = require('./naming');
 const {
-    buildWorkspacePodManifest, ANN, workspaceContainer, workspaceContainerStatus,
+    buildWorkspacePodManifest, ANN, workspaceContainer, workspaceContainerStatus, FILES_CONTAINER,
 } = require('./podTemplate');
 const { validateRepoUrl, validateBranch, validateOptionalBranch } = require('./validate');
 const agent = require('./agentClient');
@@ -165,6 +165,7 @@ function describePod(pod, { agentHealth = null, warning = null } = {}) {
         claudeUrl: validClaudeUrl(agentHealth?.claudeUrl),
         ralphUrl: ralphAvailable(pod) ? `/ralph/${pod.metadata.name}/` : null,
         ralph: ralphAvailable(pod) ? ralphState(agentHealth) : null,
+        filesUrl: filesAvailable(pod) ? `/files/${pod.metadata.name}/` : null,
         limits: limitsFromPod(pod),
         resourceProfile: ann[ANN.resourceProfile] || null,
     };
@@ -177,6 +178,14 @@ function describePod(pod, { agentHealth = null, warning = null } = {}) {
 function ralphAvailable(pod) {
     return cfg.ralph.enabled && (workspaceContainer(pod)?.ports || [])
         .some((p) => p.name === 'ralph-ui');
+}
+
+/**
+ * Decided by the pod alone: one started before the sidecar existed, or while
+ * FILES_ENABLE was off, has nothing to open whatever the setting says now.
+ */
+function filesAvailable(pod) {
+    return (pod.spec?.containers || []).some((c) => c.name === FILES_CONTAINER);
 }
 
 const SUPERVISOR_STATES = new Set([
@@ -417,5 +426,5 @@ module.exports = {
     deriveStatus, describePod, stageLabel, FATAL_STAGES, describeWithContext, listSessions, getSession,
     createSession, deleteSession, restartSession,
     ConflictError, CapacityError, sessionsCache,
-    parseCpuLimit, parseMemLimit, ralphAvailable,
+    parseCpuLimit, parseMemLimit, ralphAvailable, filesAvailable,
 };
