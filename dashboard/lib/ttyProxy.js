@@ -7,6 +7,7 @@ const agent = require('./agentClient');
 
 const TTY_PORT = 7681;
 const CODEX_PORT = 7684;
+const { FILES_PORT } = require('./podTemplate');
 const targetCache = new Map();       // workspace id + port -> { ip, port, expiresAt }
 
 const cacheKey = (id, port) => `${id}:${port}`;
@@ -77,6 +78,52 @@ async function resolveTarget(id, { port = TTY_PORT, healthPath = null } = {}) {
     };
     targetCache.set(key, target);
     return target;
+}
+
+/**
+ * A filebrowser token for this workspace's sidecar, for GETs that carry none.
+ *
+ * filebrowser's UI sends X-Auth on its API calls, but downloads and previews
+ * (window.open, <img>) authenticate with an `auth` cookie it sets at Path=/.
+ * Every workspace shares the dashboard's origin, so opening Files on a second
+ * workspace overwrites that cookie with a token the first one's sidecar
+ * cannot verify, and its downloads 401. X-Auth wins over the cookie, so
+ * supplying it here makes the cookie irrelevant without rewriting anything.
+ *
+ * Minting grants nothing new: the sidecar runs --noauth, so /api/login hands
+ * any caller a token. Cached per pod IP well inside filebrowser's 2 h expiry;
+ * a sidecar restart keeps its database (and so its signing key) on the
+ * emptyDir, and a replaced pod gets a new IP.
+ */
+const filesTokens = new Map();     // `${id}:${ip}` -> { token, expiresAt }
+const FILES_TOKEN_MS = 60 * 60 * 1000;
+
+function filesToken(target, timeoutMs = 2000) {
+    const key = `${target.id}:${target.ip}`;
+    const hit = filesTokens.get(key);
+    if (hit && hit.expiresAt > Date.now()) return Promise.resolve(hit.token);
+
+    return new Promise((resolve) => {
+        const req = http.request({
+            host: target.ip, port: target.port, method: 'POST', timeout: timeoutMs,
+            path: `/files/${target.id}/api/login`,
+            headers: { 'content-type': 'application/json' },
+        }, (res) => {
+            let body = '';
+            res.setEncoding('utf8');
+            res.on('data', (chunk) => { body += chunk; });
+            res.on('end', () => {
+                const token = body.trim();
+                if (res.statusCode !== 200 || token.split('.').length !== 3) return resolve(null);
+                for (const k of filesTokens.keys()) if (k.startsWith(`${target.id}:`)) filesTokens.delete(k);
+                filesTokens.set(key, { token, expiresAt: Date.now() + FILES_TOKEN_MS });
+                resolve(token);
+            });
+        });
+        req.on('error', () => resolve(null));
+        req.on('timeout', () => { req.destroy(); resolve(null); });
+        req.end('{}');
+    });
 }
 
 /** Browser WebSockets must originate from the host whose ingress authenticated them. */
@@ -225,6 +272,6 @@ function proxyUpgrade(req, socket, head, target) {
 
 module.exports = {
     resolveTarget, invalidateTarget, proxyRequest, proxyUpgrade,
-    notFoundPage, notReadyPage, ralphNotRunningPage, targetCache, TTY_PORT, CODEX_PORT,
-    probeHttp, isSameOriginUpgrade, matchWorkspaceUpgrade,
+    notFoundPage, notReadyPage, ralphNotRunningPage, targetCache, TTY_PORT, CODEX_PORT, FILES_PORT,
+    probeHttp, isSameOriginUpgrade, matchWorkspaceUpgrade, filesToken, filesTokens,
 };

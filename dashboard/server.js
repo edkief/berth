@@ -102,6 +102,35 @@ app.use('/codex/:id', asyncRoute(async (req, res) => {
     ttyProxy.proxyRequest(req, res, target);
 }));
 
+// filebrowser, the files sidecar, runs with --baseURL /files/<id>, so this is
+// the same untouched pass-through. Uploads are raw POST/PATCH (tus) bodies,
+// which is why it sits with the other proxies ahead of express.json(). No
+// WebSocket: the command runner, its only one, is disabled.
+app.use('/files/:id', asyncRoute(async (req, res) => {
+    const { id } = req.params;
+    if (!isWorkspaceId(id)) return res.status(404).send(ttyProxy.notFoundPage(id));
+
+    const target = await ttyProxy.resolveTarget(id, {
+        port: ttyProxy.FILES_PORT,
+        healthPath: `/files/${id}/health`,
+    });
+    if (target.gone) {
+        return res.status(404).type('html').send(ttyProxy.notFoundPage(id));
+    }
+    if (target.notReady) {
+        const session = sessions.describePod(target.pod, { agentHealth: target.agentHealth });
+        return res.status(503).type('html').send(ttyProxy.notReadyPage(id, session));
+    }
+    // Downloads and previews would otherwise authenticate with whichever
+    // workspace last set filebrowser's Path=/ cookie (see filesToken()).
+    if (req.method === 'GET' && !req.headers['x-auth']) {
+        const token = await ttyProxy.filesToken(target);
+        if (token) req.headers['x-auth'] = token;
+    }
+    req.url = req.originalUrl;
+    ttyProxy.proxyRequest(req, res, target);
+}));
+
 // Ralph's web UI is told its base path (RALPH_UI_BASE_PATH) the same way, and
 // its own URLs are relative, so nothing is rewritten here either. It is up only
 // while someone runs ralph in the terminal, so "not answering" gets a page that

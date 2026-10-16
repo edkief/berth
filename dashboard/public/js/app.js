@@ -48,7 +48,7 @@ function renderSessions() {
   for (const [id, card] of state.cards) if (!current.has(id)) { card.remove(); state.cards.delete(id); }
   visible.forEach((session, index) => {
     let card = state.cards.get(session.id);
-    if (!card) { card = createSessionCard(session, { onTerminate: terminateSession, onOpenTerminal: session => openUrl(session.terminalUrl || `/terminal/${encodeURIComponent(session.id)}/`), onOpenCodex: session => openUrl(session.codexUrl || `/codex/${encodeURIComponent(session.id)}/`), onOpenClaude: session => session.claudeUrl && openUrl(session.claudeUrl), onOpenRalph: openRalph }); state.cards.set(session.id, card); }
+    if (!card) { card = createSessionCard(session, { onTerminate: terminateSession, onOpenTerminal: session => openUrl(session.terminalUrl || `/terminal/${encodeURIComponent(session.id)}/`), onOpenCodex: session => openUrl(session.codexUrl || `/codex/${encodeURIComponent(session.id)}/`), onOpenClaude: session => session.claudeUrl && openUrl(session.claudeUrl), onOpenRalph: openRalph, onOpenFiles: session => session.filesUrl && openUrl(session.filesUrl) }); state.cards.set(session.id, card); }
     else updateSessionCard(card, session);
     if (list.children[index] !== card) list.insertBefore(card, list.children[index] || null);
   });

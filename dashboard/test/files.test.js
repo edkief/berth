@@ -88,3 +88,31 @@ test('filesUrl follows the pod, not the current setting', () => {
     without.status = { phase: 'Running' };
     assert.equal(describePod(without).filesUrl, null);
 });
+
+test('filesToken mints from the sidecar once, caches it, and fails soft', async () => {
+    const http = require('node:http');
+    const { filesToken, filesTokens } = require('../lib/ttyProxy');
+    let logins = 0;
+    const server = http.createServer((req, res) => {
+        if (req.method === 'POST' && req.url === `/files/${ID}/api/login`) {
+            logins += 1;
+            return res.end('aaa.bbb.ccc');
+        }
+        res.statusCode = 404;
+        res.end();
+    });
+    await new Promise((r) => server.listen(0, '127.0.0.1', r));
+    const target = { id: ID, ip: '127.0.0.1', port: server.address().port };
+    try {
+        filesTokens.clear();
+        assert.equal(await filesToken(target), 'aaa.bbb.ccc');
+        assert.equal(await filesToken(target), 'aaa.bbb.ccc');
+        assert.equal(logins, 1, 'cached per pod');
+
+        // Not a JWT (e.g. a login page from something else): no header at all.
+        assert.equal(await filesToken({ ...target, id: 'other' }), null);
+    } finally {
+        server.close();
+    }
+    assert.equal(await filesToken({ id: 'gone', ip: '127.0.0.1', port: 1 }), null);
+});

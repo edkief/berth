@@ -16,7 +16,7 @@ function summary(health) {
 
 function statusClass(status) { return `status status--${String(status || 'unknown').replace(/[^a-z-]/g, '')}`; }
 
-export function createSessionCard(session, { onTerminate, onOpenTerminal, onOpenCodex, onOpenClaude, onOpenRalph }) {
+export function createSessionCard(session, { onTerminate, onOpenTerminal, onOpenCodex, onOpenClaude, onOpenRalph, onOpenFiles }) {
   const card = document.createElement('article');
   card.className = 'session-card';
   card.dataset.session = session.id;
@@ -38,6 +38,7 @@ export function createSessionCard(session, { onTerminate, onOpenTerminal, onOpen
               <button class="launch-group__item" data-action="ralph" aria-label="Open Ralph" hidden>Ralph</button>
             </div>
             <button class="button button--secondary button--small" data-action="terminal">Terminal</button>
+            <button class="button button--secondary button--small" data-action="files" hidden>Files</button>
             <button class="button button--danger button--small" data-action="terminate">Terminate</button>
           </div>
         </div>
@@ -53,6 +54,7 @@ export function createSessionCard(session, { onTerminate, onOpenTerminal, onOpen
   action('codex').addEventListener('click', () => onOpenCodex(card._session));
   action('ralph').addEventListener('click', () => onOpenRalph(card._session));
   action('terminal').addEventListener('click', () => onOpenTerminal(card._session));
+  action('files').addEventListener('click', () => onOpenFiles(card._session));
   action('terminate').addEventListener('click', () => onTerminate(card._session));
   wirePanels(card);
   updateSessionCard(card, session);
@@ -75,6 +77,12 @@ export function updateSessionCard(card, session) {
   const codex = card.querySelector('[data-action="codex"]');
   codex.disabled = session.phase !== 'Running';
   codex.title = codex.disabled ? session.message || 'Workspace is still starting' : '';
+  // A sidecar, so independent of claude: up whenever the pod runs. Hidden for
+  // pods started without it.
+  const files = card.querySelector('[data-action="files"]');
+  files.hidden = !session.filesUrl;
+  files.disabled = session.phase !== 'Running';
+  files.title = files.disabled ? session.message || 'Workspace is still starting' : 'Browse, upload and download workspace files';
   const claude = card.querySelector('[data-action="claude"]');
   claude.disabled = !session.claudeUrl || !session.ready;
   claude.title = claude.disabled
