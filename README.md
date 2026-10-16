@@ -6,9 +6,10 @@ an authenticated, per-workspace web client backed by `codex app-server`.
 
 A small **dashboard** app lets you browse your GitHub repos, pick a branch, and
 launch a workspace. Each workspace is **its own Kubernetes pod** with a web
-terminal ([ttyd](https://github.com/tsl0922/ttyd)), Codex UI, a persistent
-per-repo volume, and a scratch Postgres. The dashboard proxies both browser
-interfaces directly to that pod. Workspaces also ship the `gh` CLI and a
+terminal ([ttyd](https://github.com/tsl0922/ttyd)), Codex UI, a file browser
+([filebrowser](https://github.com/filebrowser/filebrowser), as a sidecar), a
+persistent per-repo volume, and a scratch Postgres. The dashboard proxies every
+browser interface directly to that pod. Workspaces also ship the `gh` CLI and a
 Playwright MCP server for browser automation from inside a session.
 
 ## How it works
@@ -24,6 +25,7 @@ Browser
 │   /terminal/<id> mobile terminal shell  │
 │   /tty/<id>/*   reverse proxy (HTTP+WS) │────┐
 │   /codex/<id>/* reverse proxy (HTTP+WS) │────┤
+│   /files/<id>/* reverse proxy (HTTP)    │────┤
 │   /config-tty/  shared-config shell     │    │
 └─────────────────────────────────────────┘    ▼
                         ┌──────────────────────────────────────┐
@@ -32,6 +34,7 @@ Browser
                         │   codexapp → codex app-server        │
                         │   agent (health/disk), postgres      │
                         │   /workspace ← per-repo PVC          │
+                        │   files sidecar: filebrowser → PVC   │
                         └──────────────────────────────────────┘
 ```
 
@@ -130,6 +133,8 @@ default branch. Override with `REGISTRY=...` / `REPO_NAME=...`.
 | `K8S_NAMESPACE` | `dev` | `docker-push.sh --rollout` target |
 | `DEFAULT_BRANCH` | `main` | branch that may tag `:latest` |
 | `MAX_WORKSPACES` | `4` | dashboard env |
+| `FILES_ENABLE` | `1` | dashboard env (filebrowser sidecar) |
+| `FILES_IMAGE` | `filebrowser/filebrowser:v2.63.23` | dashboard env |
 
 ### 4. Deploy
 
@@ -185,6 +190,10 @@ error rather than an obvious misconfiguration.
   `/workspace/_home/codex` when the pod is replaced.
 - **Open Claude/terminal** — press *Terminal*, or attach through Claude Remote
   as before. Codex and Claude run alongside each other in the same checkout.
+- **Files** — browse, upload, download (incl. zipped folders) and edit
+  anything on the repo's volume: every branch checkout and `_home/`. It runs in
+  its own container, so it stays up when the workspace is OOMKilled. Files
+  outside the volume (`~`, `/tmp`) are not visible.
 - **Open Claude** appears once the workspace's Claude Remote session has
   actually printed a `claude.ai/code` link in its pane — the card links straight
   to that live session instead of just the terminal.
