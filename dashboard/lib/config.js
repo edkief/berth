@@ -88,6 +88,15 @@ module.exports = {
         uiPort: intEnv('RALPH_UI_PORT', 4280),
     },
 
+    // filebrowser, as a sidecar on the repo PVC, proxied at /files/<id>/. On
+    // by default; takes effect for workspaces started after a change. Pinned:
+    // upstream is archived and v2.63.23 is its last release, so a floating tag
+    // buys nothing but surprise.
+    files: {
+        enabled: boolEnv('FILES_ENABLE', true),
+        image: env('FILES_IMAGE', 'filebrowser/filebrowser:v2.63.23'),
+    },
+
     // Resource profiles share the dashboard's existing config PVC. The store
     // is a separate file because claude-config-sync owns the rest of this tree.
     resourceProfilesPath: env('RESOURCE_PROFILES_PATH',

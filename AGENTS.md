@@ -3,7 +3,7 @@
 Browser-accessible Claude Code and Codex development environments on
 Kubernetes. A small dashboard app manages **one pod per workspace**: pick a
 repo and branch, get a web terminal with Claude Remote and a Codex UI attached,
-a per-repo persistent volume, and a scratch Postgres.
+a file browser, a per-repo persistent volume, and a scratch Postgres.
 
 **Berth** is the product's name, and it is the *only* name it goes by:
 the dashboard's title, header and the marketing page at `/welcome`
@@ -36,6 +36,7 @@ Browser
 │   /tty/<id>/*    HTTP+WS reverse proxy    │────┐
 │   /codex/<id>/*  HTTP+WS reverse proxy    │────┤
 │   /ralph/<id>/*  HTTP proxy (opt-in)      │────┤
+│   /files/<id>/*  HTTP proxy (sidecar)     │────┤
 │   /config-tty/   shared-config shell      │    │
 └───────────────────────────────────────────┘    │
                                                   ▼
@@ -47,6 +48,8 @@ Browser
                         │   :7682 agent    → /healthz /disk      │
                         │   :5432 postgres (scratch)             │
                         │   /workspace ← per-repo PVC             │
+                        ├╌╌ files sidecar (own container) ╌╌╌╌╌╌╌╌┤
+                        │   :7685 filebrowser → same PVC          │
                         └────────────────────────────────────────┘
 ```
 
@@ -71,6 +74,7 @@ which is the reason this design replaced the previous single-pod one.
 | `dashboard/lib/tokenRefresh.js` | Renews the shared login and publishes it |
 | `dashboard/lib/ttyProxy.js` (`CODEX_PORT`) | Also resolves and proxies the Codex UI target |
 | `server.js` `/ralph/:id` + `agent.js` `probeRalph()` | Opt-in Ralph web UI proxy, and the probe that drives its button |
+| `podTemplate.js` `filesContainer()` + `server.js` `/files/:id` | The filebrowser sidecar, and its proxy (incl. `filesToken()` in `ttyProxy.js`) |
 | `dashboard/public/js/ralph-state.mjs` | `ralphView()` — the Ralph button's state, dot and action; pure, unit-tested |
 | `dashboard/prune-pvcs.js` | PVC pruner, run by a CronJob |
 | `dashboard/public/index.html` | Single-file dashboard UI, no build step |
@@ -325,6 +329,46 @@ workspaces started afterwards.
   Ralph never affects readiness or liveness.
 - `RALPH_UI_PORT` is also in `k8s/networkpolicy.yaml`; change both together.
 
+## Files (filebrowser sidecar)
+
+Every workspace pod also runs [filebrowser](https://github.com/filebrowser/filebrowser)
+in a second container, `files`, over the whole repo PVC (`/workspace`: every
+branch checkout and `_home/`), proxied at `/files/<id>/` and linked as
+**Files** on the card. `FILES_ENABLE=0` leaves new pods single-container;
+`FILES_IMAGE` picks the image.
+
+- **A sidecar, not a supervisord program.** A runaway agent that OOMs the
+  workspace container is exactly when you want its files; the sidecar has its
+  own (fixed, small) limits and restarts on its own. It sees only the PVC — the
+  container layer (`~`, `/tmp`, `pgdata`) is the workspace container's alone.
+- **A regular container, not a native sidecar.** An init container with
+  `restartPolicy: Always` must start before the workspace does, so a failed
+  pull of this image would hold every workspace at `PodInitializing`, which
+  `deriveStatus()` never sees. It has **no probes** either: pod readiness is
+  the workspace's UI status, and the proxy probes `/files/<id>/health` itself.
+- **The workspace container is found by name, never index.** The kubelet
+  orders `status.containerStatuses` by name, so `files` is listed before
+  `workspace`. `workspaceContainer()`/`workspaceContainerStatus()` in
+  `podTemplate.js` are what `sessions.js` reads; `metrics.js` counts only the
+  workspace container against its limit.
+- **`--noauth`, behind the same boundary as ttyd.** Ingress auth and the
+  NetworkPolicy (port 7685) are the boundary; the command runner is disabled.
+  It can read `_home/` (the Claude/Codex logins) — so can the terminal.
+- **`--baseURL /files/<id>`**, so the proxy rewrites no body. The command
+  replaces the image's `init.sh`; its database (one noauth admin, settings,
+  signing key) is throwaway, on an emptyDir with the read-only root's `/tmp`.
+- **The proxy supplies `X-Auth` on header-less GETs.** filebrowser
+  authenticates downloads and previews with an `auth` cookie it sets at
+  `Path=/`, and every workspace shares the dashboard's origin, so a second
+  Files tab overwrote the first one's cookie with a token its sidecar could not
+  verify (401). `filesToken()` mints the sidecar's own token from its noauth
+  `/api/login` (cached per pod IP) and X-Auth wins over the cookie.
+- **Upstream is archived** (2026-09-01; v2.63.23 is the last release, no more
+  security fixes). Kept anyway: its own guidance for continued use — behind an
+  authenticating proxy, command runner off, unprivileged, one directory
+  mounted — is this deployment. FileBrowser Quantum was the alternative, but
+  its config schema was still churning; moving is an image and args change.
+
 ## Storage
 
 **One PVC per repo**, named `workspaceId(key)`, holding every branch:
@@ -570,7 +614,7 @@ narrow TOCTOU window remains.)
 |---|---|---|
 | `GET` | `/api/info` | Namespace, workspace image, `metricsAvailable`, defaults |
 | `GET` | `/api/repos`, `/api/branches?repo=` | GitHub listing |
-| `GET` | `/api/sessions`, `/api/sessions/:id` | 30 s cache, skipped while anything is unsettled; each session carries `terminalUrl`, `codexUrl`, (once discovered) `claudeUrl`, and with Ralph enabled `ralphUrl` + `ralph` |
+| `GET` | `/api/sessions`, `/api/sessions/:id` | 30 s cache, skipped while anything is unsettled; each session carries `terminalUrl`, `codexUrl`, `filesUrl`, (once discovered) `claudeUrl`, and with Ralph enabled `ralphUrl` + `ralph` |
 | `POST` | `/api/sessions` | **202** / 400 / **409** / 429 |
 | `GET` · `PUT` · `DELETE` | `/api/resource-profiles/*` | Manage PVC-backed requests/limits and the startup default |
 | `DELETE` | `/api/sessions/:id` | 202; keeps the PVC unless `?deletePvc=true` |
@@ -586,6 +630,7 @@ narrow TOCTOU window remains.)
 | `POST` | `/api/config/token/refresh` | Run a maintenance pass now; `?force=1` renews even when not due |
 | `GET` | `/terminal/:id/` | User-facing ttyd wrapper with mobile shortcut and function-key drawer; `:id` is a workspace or `config` for the shared-config shell |
 | `ALL` | `/tty/:id/*`, `/codex/:id/*`, `/config-tty/*` | Proxied (incl. WebSocket upgrade) |
+| `ALL` | `/files/:id/*` | filebrowser, proxied; `X-Auth` added to header-less GETs. Sessions carry `filesUrl` only when their pod has the sidecar |
 | `GET` | `/ralph/:id/*` | Ralph's web UI, proxied; 404 unless `RALPH_ENABLE`, a self-refreshing *not running yet* page until it answers |
 | `GET` | `/welcome` | The Berth landing page (`landing.html`); everything else falls through to the dashboard SPA |
 

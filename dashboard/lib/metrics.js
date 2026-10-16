@@ -2,6 +2,7 @@
 
 const cfg = require('./config');
 const { customObjects } = require('./k8s');
+const { WORKSPACE_CONTAINER } = require('./podTemplate');
 
 let available = null;               // null = not yet probed
 let lastProbe = 0;
@@ -62,6 +63,24 @@ async function isAvailable() {
 }
 
 /**
+ * Usage of the workspace container alone. The meter compares it against that
+ * container's limit, and a sidecar's usage counts against its own limit, not
+ * claude's -- summing the pod would read as headroom that does not exist.
+ * A pod with no container of that name falls back to the whole pod.
+ */
+function workspaceUsage(item) {
+    const containers = item.containers || [];
+    const own = containers.filter((c) => c.name === WORKSPACE_CONTAINER);
+    let cpu = 0;
+    let mem = 0;
+    for (const c of own.length ? own : containers) {
+        cpu += parseCpuToMillicores(c.usage?.cpu);
+        mem += parseMemToMiB(c.usage?.memory);
+    }
+    return { cpu, mem };
+}
+
+/**
  * @param sessions  session objects, used for per-pod limits (always available
  *                  from the pod spec, even when metrics-server is not).
  */
@@ -88,12 +107,7 @@ async function collect(sessions) {
         for (const item of items) {
             const id = item.metadata?.name;
             if (!id) continue;
-            let cpu = 0;
-            let mem = 0;
-            for (const c of item.containers || []) {
-                cpu += parseCpuToMillicores(c.usage?.cpu);
-                mem += parseMemToMiB(c.usage?.memory);
-            }
+            const { cpu, mem } = workspaceUsage(item);
             const limits = limitsById.get(id) || {};
             out[id] = {
                 cpuMillicores: Math.round(cpu),
@@ -113,4 +127,4 @@ async function collect(sessions) {
     }
 }
 
-module.exports = { collect, isAvailable, parseCpuToMillicores, parseMemToMiB };
+module.exports = { collect, isAvailable, parseCpuToMillicores, parseMemToMiB, workspaceUsage };
