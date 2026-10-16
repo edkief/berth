@@ -83,10 +83,14 @@ RUN curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.5/install.sh | b
         "@openai/codex@${CODEX_CLI_VERSION}" \
         "@edkief/codexapp@${CODEX_APP_VERSION}"
 
+# --locked builds wasm-pack against the Cargo.lock it was published with.
+# Without it cargo re-resolves every dependency, and binary-install's
+# `zip = "^2.1.3"` no longer resolves at all: every zip 2.x is yanked. A
+# yanked version pinned by a lockfile still installs.
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable \
     && . "$CARGO_HOME/env" \
     && rustup target add wasm32-unknown-unknown \
-    && cargo install wasm-pack
+    && cargo install --locked wasm-pack
 
 # Symlink nvm-managed binaries into /usr/local/bin so supervisord (no .bashrc)
 # and the byobu login shell (which reads .bash_profile, not nvm.sh) can find
