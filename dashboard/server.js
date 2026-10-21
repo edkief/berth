@@ -160,6 +160,41 @@ app.use('/ralph/:id', asyncRoute(async (req, res) => {
     ttyProxy.proxyRequest(req, res, target);
 }));
 
+// code-server is the exception to "rewrite nothing": it has no base-path
+// option, so the prefix is stripped instead. That is safe only because every
+// URL it emits is relative -- which is also why a bare /code/<id> must gain its
+// trailing slash first, or those URLs resolve against /code/. Its own /healthz
+// is the probe: up whenever the pod was started with CODE_ENABLE.
+app.use('/code/:id', asyncRoute(async (req, res) => {
+    const { id } = req.params;
+    if (!isWorkspaceId(id)) return res.status(404).send(ttyProxy.notFoundPage(id));
+
+    const [pathname, query] = req.originalUrl.split(/\?(.*)/s);
+    if (pathname === `/code/${id}`) {
+        return res.redirect(302, `/code/${id}/${query ? `?${query}` : ''}`);
+    }
+
+    const target = await ttyProxy.resolveTarget(id, {
+        port: ttyProxy.CODE_PORT,
+        healthPath: '/healthz',
+    });
+    if (target.gone) {
+        return res.status(404).type('html').send(ttyProxy.notFoundPage(id));
+    }
+    if (target.notReady && !target.pod?.status?.podIP) {
+        const session = sessions.describePod(target.pod);
+        return res.status(503).type('html').send(ttyProxy.notReadyPage(id, session));
+    }
+    if (target.notReady && !sessions.codeAvailable(target.pod)) {
+        return res.status(404).type('text')
+            .send('VS Code is not enabled for this workspace (CODE_ENABLE when it started).');
+    }
+    if (target.notReady) {
+        return res.status(503).type('html').send(ttyProxy.codeNotRunningPage(id));
+    }
+    ttyProxy.proxyRequest(req, res, target, { path: ttyProxy.codeUpstreamPath(req.originalUrl, id) });
+}));
+
 // ------------------------------------------------------------------- config
 
 // The config shell runs inside this pod, so it is a plain localhost hop --
@@ -542,7 +577,7 @@ server.on('upgrade', async (req, socket, head) => {
         });
         if (target.gone) return socket.end('HTTP/1.1 404 Not Found\r\n\r\n');
         if (target.notReady) return socket.end('HTTP/1.1 503 Service Unavailable\r\n\r\n');
-        ttyProxy.proxyUpgrade(req, socket, head, target);
+        ttyProxy.proxyUpgrade(req, socket, head, target, { path: match.path || req.url });
     } catch {
         socket.destroy();
     }

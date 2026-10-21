@@ -16,7 +16,7 @@ function summary(health) {
 
 function statusClass(status) { return `status status--${String(status || 'unknown').replace(/[^a-z-]/g, '')}`; }
 
-export function createSessionCard(session, { onTerminate, onOpenTerminal, onOpenCodex, onOpenClaude, onOpenRalph, onOpenFiles }) {
+export function createSessionCard(session, { onTerminate, onOpenTerminal, onOpenCodex, onOpenClaude, onOpenRalph, onOpenFiles, onOpenCode }) {
   const card = document.createElement('article');
   card.className = 'session-card';
   card.dataset.session = session.id;
@@ -39,6 +39,7 @@ export function createSessionCard(session, { onTerminate, onOpenTerminal, onOpen
             </div>
             <button class="button button--secondary button--small" data-action="terminal">Terminal</button>
             <button class="button button--secondary button--small" data-action="files" hidden>Files</button>
+            <button class="button button--secondary button--small" data-action="code" hidden>VS Code</button>
             <button class="button button--danger button--small" data-action="terminate">Terminate</button>
           </div>
         </div>
@@ -55,6 +56,7 @@ export function createSessionCard(session, { onTerminate, onOpenTerminal, onOpen
   action('ralph').addEventListener('click', () => onOpenRalph(card._session));
   action('terminal').addEventListener('click', () => onOpenTerminal(card._session));
   action('files').addEventListener('click', () => onOpenFiles(card._session));
+  action('code').addEventListener('click', () => onOpenCode(card._session));
   action('terminate').addEventListener('click', () => onTerminate(card._session));
   wirePanels(card);
   updateSessionCard(card, session);
@@ -83,6 +85,13 @@ export function updateSessionCard(card, session) {
   files.hidden = !session.filesUrl;
   files.disabled = session.phase !== 'Running';
   files.title = files.disabled ? session.message || 'Workspace is still starting' : 'Browse, upload and download workspace files';
+  // code-server runs in the workspace container under supervisord, so it is
+  // up once the pod runs; the proxy shows a refreshing page until it answers.
+  // Hidden for pods started without CODE_ENABLE.
+  const code = card.querySelector('[data-action="code"]');
+  code.hidden = !session.codeUrl;
+  code.disabled = session.phase !== 'Running';
+  code.title = code.disabled ? session.message || 'Workspace is still starting' : 'Open VS Code on this workspace';
   const claude = card.querySelector('[data-action="claude"]');
   claude.disabled = !session.claudeUrl || !session.ready;
   claude.title = claude.disabled

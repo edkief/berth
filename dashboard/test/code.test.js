@@ -53,3 +53,39 @@ test('codeUrl follows the pod, not the current setting', () => {
     without.status = { phase: 'Running' };
     assert.equal(describePod(without).codeUrl, null);
 });
+
+test('editor upgrades select code-server and reach it without the prefix', () => {
+    const { matchWorkspaceUpgrade, codeUpstreamPath } = require('../lib/ttyProxy');
+    assert.deepEqual(matchWorkspaceUpgrade(`/code/${ID}/stable-abc?reconnectionToken=t&skipWebSocketFrames=false`), {
+        service: 'code', id: ID, port: CODE_PORT, healthPath: '/healthz',
+        path: '/stable-abc?reconnectionToken=t&skipWebSocketFrames=false',
+    });
+    assert.equal(matchWorkspaceUpgrade(`/code/${ID}`).path, '/');
+    assert.equal(matchWorkspaceUpgrade(`/codex/${ID}/`), null);
+    assert.equal(matchWorkspaceUpgrade(`/code/${ID}x/`).id, `${ID}x`);
+    assert.equal(codeUpstreamPath(`/code/${ID}/?folder=/workspace/main`, ID), '/?folder=/workspace/main');
+    assert.equal(codeUpstreamPath(`/code/${ID}?a=1`, ID), '/?a=1');
+});
+
+test('proxyRequest forwards to the overridden path, and to req.url by default', async () => {
+    const http = require('node:http');
+    const { proxyRequest } = require('../lib/ttyProxy');
+    const seen = [];
+    const upstream = http.createServer((req, res) => { seen.push(req.url); res.end('ok'); });
+    await new Promise((r) => upstream.listen(0, '127.0.0.1', r));
+    const target = { id: ID, ip: '127.0.0.1', port: upstream.address().port };
+    const front = http.createServer((req, res) => {
+        if (req.url.startsWith('/code/')) proxyRequest(req, res, target, { path: '/stripped' });
+        else proxyRequest(req, res, target);
+    });
+    await new Promise((r) => front.listen(0, '127.0.0.1', r));
+    const base = `http://127.0.0.1:${front.address().port}`;
+    try {
+        assert.equal(await (await fetch(`${base}/code/${ID}/x`)).text(), 'ok');
+        assert.equal(await (await fetch(`${base}/tty/${ID}/y`)).text(), 'ok');
+        assert.deepEqual(seen, ['/stripped', `/tty/${ID}/y`]);
+    } finally {
+        front.close();
+        upstream.close();
+    }
+});
