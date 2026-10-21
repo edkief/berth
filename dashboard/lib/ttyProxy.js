@@ -7,7 +7,7 @@ const agent = require('./agentClient');
 
 const TTY_PORT = 7681;
 const CODEX_PORT = 7684;
-const { FILES_PORT } = require('./podTemplate');
+const { FILES_PORT, CODE_PORT } = require('./podTemplate');
 const targetCache = new Map();       // workspace id + port -> { ip, port, expiresAt }
 
 const cacheKey = (id, port) => `${id}:${port}`;
@@ -137,7 +137,17 @@ function isSameOriginUpgrade(req) {
     }
 }
 
-/** Parse only the WebSocket paths understood by the two workspace services. */
+/**
+ * code-server is the one service proxied with its prefix stripped: it has no
+ * base-path option, and needs none, because every URL it emits is relative.
+ * `/code/<id>/x?y` reaches it as `/x?y`; a bare `/code/<id>` as `/`.
+ */
+function codeUpstreamPath(url, id) {
+    const rest = url.slice(`/code/${id}`.length);
+    return rest.startsWith('/') ? rest : `/${rest}`;
+}
+
+/** Parse only the WebSocket paths understood by the workspace services. */
 function matchWorkspaceUpgrade(url) {
     let match = /^\/tty\/([a-z0-9-]+)(?:\/|\?|$)/.exec(url);
     if (match) return { service: 'tty', id: match[1], port: TTY_PORT };
@@ -147,6 +157,14 @@ function matchWorkspaceUpgrade(url) {
         return {
             service: 'codex', id: match[1], port: CODEX_PORT,
             healthPath: `/codex/${match[1]}/`,
+        };
+    }
+
+    match = /^\/code\/([a-z0-9-]+)(?:\/|\?|$)/.exec(url);
+    if (match) {
+        return {
+            service: 'code', id: match[1], port: CODE_PORT,
+            healthPath: '/healthz', path: codeUpstreamPath(url, match[1]),
         };
     }
     return null;
@@ -202,12 +220,25 @@ function ralphNotRunningPage(id) {
     });
 }
 
-function proxyRequest(req, res, target) {
+function codeNotRunningPage(id) {
+    return page({
+        title: 'VS Code is starting',
+        refresh: 3,
+        body: `<h1>VS Code is not answering yet</h1>` +
+            `<p>The editor starts with the workspace; this page opens it as soon as it ` +
+            `answers. If it never does, its log is <code>/var/log/supervisor/code-server.log</code> ` +
+            `in the <a href="/terminal/${escapeHtml(id)}/">workspace terminal</a>.</p>` +
+            `<p style="opacity:.6">This page refreshes automatically.</p>` +
+            `<p><a href="/">Back to the dashboard</a></p>`,
+    });
+}
+
+function proxyRequest(req, res, target, { path = req.url } = {}) {
     const upstream = http.request({
         host: target.ip,
         port: target.port,
         method: req.method,
-        path: req.url,
+        path,
         headers: req.headers,
     }, (upstreamRes) => {
         res.writeHead(upstreamRes.statusCode, upstreamRes.headers);
@@ -231,14 +262,14 @@ function proxyRequest(req, res, target) {
 }
 
 /** WebSocket upgrade, proxied by hand on the raw socket. Express never sees it. */
-function proxyUpgrade(req, socket, head, target) {
+function proxyUpgrade(req, socket, head, target, { path = req.url } = {}) {
     socket.on('error', () => socket.destroy());
 
     const upstream = http.request({
         host: target.ip,
         port: target.port,
         method: req.method,
-        path: req.url,
+        path,
         headers: req.headers,
     });
 
@@ -272,6 +303,7 @@ function proxyUpgrade(req, socket, head, target) {
 
 module.exports = {
     resolveTarget, invalidateTarget, proxyRequest, proxyUpgrade,
-    notFoundPage, notReadyPage, ralphNotRunningPage, targetCache, TTY_PORT, CODEX_PORT, FILES_PORT,
-    probeHttp, isSameOriginUpgrade, matchWorkspaceUpgrade, filesToken, filesTokens,
+    notFoundPage, notReadyPage, ralphNotRunningPage, codeNotRunningPage,
+    targetCache, TTY_PORT, CODEX_PORT, FILES_PORT, CODE_PORT,
+    probeHttp, isSameOriginUpgrade, matchWorkspaceUpgrade, codeUpstreamPath, filesToken, filesTokens,
 };

@@ -168,6 +168,11 @@ spec:
             # changing k8s/networkpolicy.yaml too.
             - name: RALPH_ENABLE
               value: "0"
+            # "1" runs code-server (browser VS Code) in workspaces started
+            # afterwards, behind a VS Code button and /code/<id>/. It listens
+            # on 7686, which k8s/networkpolicy.yaml admits from here only.
+            - name: CODE_ENABLE
+              value: "0"
             - name: GITHUB_USER
               value: "edkief"
             - name: GITHUB_TOKEN

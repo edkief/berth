@@ -26,12 +26,14 @@ Browser
 │   /tty/<id>/*   reverse proxy (HTTP+WS) │────┐
 │   /codex/<id>/* reverse proxy (HTTP+WS) │────┤
 │   /files/<id>/* reverse proxy (HTTP)    │────┤
+│   /code/<id>/*  reverse proxy (opt-in)  │────┤
 │   /config-tty/  shared-config shell     │    │
 └─────────────────────────────────────────┘    ▼
                         ┌──────────────────────────────────────┐
                         │ berth-workspace pod (one per repo)   │
                         │   ttyd → byobu → claude remote       │
                         │   codexapp → codex app-server        │
+                        │   code-server (opt-in VS Code)       │
                         │   agent (health/disk), postgres      │
                         │   /workspace ← per-repo PVC          │
                         │   files sidecar: filebrowser → PVC   │
@@ -135,6 +137,7 @@ default branch. Override with `REGISTRY=...` / `REPO_NAME=...`.
 | `MAX_WORKSPACES` | `4` | dashboard env |
 | `FILES_ENABLE` | `1` | dashboard env (filebrowser sidecar) |
 | `FILES_IMAGE` | `filebrowser/filebrowser:v2.63.23` | dashboard env |
+| `CODE_ENABLE` | `0` | dashboard env (browser VS Code; port 7686 in `k8s/networkpolicy.yaml`) |
 
 ### 4. Deploy
 
@@ -194,6 +197,12 @@ error rather than an obvious misconfiguration.
   anything on the repo's volume: every branch checkout and `_home/`. It runs in
   its own container, so it stays up when the workspace is OOMKilled. Files
   outside the volume (`~`, `/tmp`) are not visible.
+- **VS Code** — with `CODE_ENABLE=1` on the dashboard, a browser VS Code
+  (code-server) on the workspace checkout, in the same container as the agents:
+  their edits show up live, and its terminal has the same tools and
+  credentials. Settings and extensions persist per repo under
+  `/workspace/_home/code-server`. Off by default; affects workspaces started
+  afterwards.
 - **Open Claude** appears once the workspace's Claude Remote session has
   actually printed a `claude.ai/code` link in its pane — the card links straight
   to that live session instead of just the terminal.

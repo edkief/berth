@@ -166,6 +166,7 @@ function describePod(pod, { agentHealth = null, warning = null } = {}) {
         ralphUrl: ralphAvailable(pod) ? `/ralph/${pod.metadata.name}/` : null,
         ralph: ralphAvailable(pod) ? ralphState(agentHealth) : null,
         filesUrl: filesAvailable(pod) ? `/files/${pod.metadata.name}/` : null,
+        codeUrl: codeAvailable(pod) ? `/code/${pod.metadata.name}/` : null,
         limits: limitsFromPod(pod),
         resourceProfile: ann[ANN.resourceProfile] || null,
     };
@@ -186,6 +187,15 @@ function ralphAvailable(pod) {
  */
 function filesAvailable(pod) {
     return (pod.spec?.containers || []).some((c) => c.name === FILES_CONTAINER);
+}
+
+/**
+ * Also decided by the pod: code-server runs exactly when it was started with
+ * CODE_ENABLE, which is when the template declared its port. Turning the
+ * setting off later leaves a running editor reachable until the pod goes.
+ */
+function codeAvailable(pod) {
+    return (workspaceContainer(pod)?.ports || []).some((p) => p.name === 'code-ui');
 }
 
 const SUPERVISOR_STATES = new Set([
@@ -426,5 +436,5 @@ module.exports = {
     deriveStatus, describePod, stageLabel, FATAL_STAGES, describeWithContext, listSessions, getSession,
     createSession, deleteSession, restartSession,
     ConflictError, CapacityError, sessionsCache,
-    parseCpuLimit, parseMemLimit, ralphAvailable, filesAvailable,
+    parseCpuLimit, parseMemLimit, ralphAvailable, filesAvailable, codeAvailable,
 };

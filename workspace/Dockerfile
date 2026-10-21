@@ -47,6 +47,17 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
     && apt-get update && apt-get install -y gh \
     && rm -rf /var/lib/apt/lists/*
 
+# code-server (browser VS Code), opt-in per dashboard via CODE_ENABLE. The
+# release tarball is self-contained (it bundles its own node), so it neither
+# depends on nor disturbs the nvm toolchain below. Pinned: bump deliberately.
+ARG CODE_SERVER_VERSION=4.141.0
+RUN curl -fsSL -o /tmp/code-server.tar.gz \
+        "https://github.com/coder/code-server/releases/download/v${CODE_SERVER_VERSION}/code-server-${CODE_SERVER_VERSION}-linux-amd64.tar.gz" \
+    && mkdir -p /opt/code-server \
+    && tar -xzf /tmp/code-server.tar.gz -C /opt/code-server --strip-components=1 \
+    && rm /tmp/code-server.tar.gz \
+    && ln -s /opt/code-server/bin/code-server /usr/local/bin/code-server
+
 RUN echo "ubuntu ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
 USER ubuntu
@@ -214,8 +225,8 @@ RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/claude-config-sync
 USER ubuntu
 WORKDIR /workspace
 
-# 7681 ttyd, 7682 agent, 7684 Codex UI, 4280 Ralph UI (all dashboard-only),
-# 5432 Postgres.
-EXPOSE 7681 7682 7684 4280 5432
+# 7681 ttyd, 7682 agent, 7684 Codex UI, 7686 code-server, 4280 Ralph UI (all
+# dashboard-only), 5432 Postgres.
+EXPOSE 7681 7682 7684 7686 4280 5432
 
 CMD ["/usr/local/bin/entrypoint.sh"]

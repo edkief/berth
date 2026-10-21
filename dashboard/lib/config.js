@@ -88,6 +88,13 @@ module.exports = {
         uiPort: intEnv('RALPH_UI_PORT', 4280),
     },
 
+    // code-server (browser VS Code) in the workspace container, proxied at
+    // /code/<id>/. Opt-in; takes effect for workspaces started after a change.
+    // Its port is fixed (CODE_PORT in podTemplate.js) and in the NetworkPolicy.
+    code: {
+        enabled: boolEnv('CODE_ENABLE', false),
+    },
+
     // filebrowser, as a sidecar on the repo PVC, proxied at /files/<id>/. On
     // by default; takes effect for workspaces started after a change. Pinned:
     // upstream is archived and v2.63.23 is its last release, so a floating tag
