@@ -24,13 +24,20 @@ esac
 CODE_HOME="${CODE_HOME:-/workspace/_home/code-server}"
 mkdir -p "$CODE_HOME/data/User" "$CODE_HOME/extensions"
 
-# Workspace trust guards against running an untrusted checkout's code; here the
-# agents already run this checkout with full access, and the prompt would only
-# stand between the user and the integrated terminal. Seeded once, never over
-# settings the user has since made their own.
+# First-run user settings, seeded once and never over settings the user has
+# since made their own:
+# - workspace trust guards against running an untrusted checkout's code; here
+#   the agents already run this checkout with full access, and the prompt only
+#   stood between the user and the integrated terminal.
+# - VS Code's built-in chat starts a Copilot runtime (~100 MB) on the first
+#   connect and keeps it after the tab closes. Claude and Codex are this
+#   workspace's agents and there is no Copilot login, so it is off.
 SETTINGS="$CODE_HOME/data/User/settings.json"
 if [ ! -e "$SETTINGS" ]; then
-    printf '{\n    "security.workspace.trust.enabled": false\n}\n' > "$SETTINGS"
+    printf '%s\n' '{' \
+        '    "security.workspace.trust.enabled": false,' \
+        '    "chat.disableAIFeatures": true' \
+        '}' > "$SETTINGS"
 fi
 
 exec code-server \
