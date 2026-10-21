@@ -37,6 +37,7 @@ Browser
 │   /codex/<id>/*  HTTP+WS reverse proxy    │────┤
 │   /ralph/<id>/*  HTTP proxy (opt-in)      │────┤
 │   /files/<id>/*  HTTP proxy (sidecar)     │────┤
+│   /code/<id>/*   HTTP+WS proxy (opt-in)   │────┤
 │   /config-tty/   shared-config shell      │    │
 └───────────────────────────────────────────┘    │
                                                   ▼
@@ -45,6 +46,7 @@ Browser
                         │   :7681 ttyd     → byobu → claude remote│
                         │   :7684 codexapp → codex app-server    │
                         │   :4280 ralph daemon (opt-in) → UI     │
+                        │   :7686 code-server (opt-in) → VS Code │
                         │   :7682 agent    → /healthz /disk      │
                         │   :5432 postgres (scratch)             │
                         │   /workspace ← per-repo PVC             │
@@ -75,6 +77,7 @@ which is the reason this design replaced the previous single-pod one.
 | `dashboard/lib/ttyProxy.js` (`CODEX_PORT`) | Also resolves and proxies the Codex UI target |
 | `server.js` `/ralph/:id` + `agent.js` `probeRalph()` | Opt-in Ralph web UI proxy, and the probe that drives its button |
 | `podTemplate.js` `filesContainer()` + `server.js` `/files/:id` | The filebrowser sidecar, and its proxy (incl. `filesToken()` in `ttyProxy.js`) |
+| `workspace/bootstrap/code-server.sh` + `server.js` `/code/:id` | Opt-in browser VS Code: its launcher (a no-op without `CODE_ENABLE`), and its prefix-stripping proxy (`codeUpstreamPath()` in `ttyProxy.js`) |
 | `dashboard/public/js/ralph-state.mjs` | `ralphView()` — the Ralph button's state, dot and action; pure, unit-tested |
 | `dashboard/prune-pvcs.js` | PVC pruner, run by a CronJob |
 | `dashboard/public/index.html` | Single-file dashboard UI, no build step |
@@ -115,7 +118,7 @@ which is the reason this design replaced the previous single-pod one.
    own second `claude` from holding the pod ready.
 7. Nothing supervises claude: `entrypoint.sh` types it into the tmux pane, and
    supervisord runs only ttyd, codexapp, the agent and Postgres (plus Ralph's
-   daemon when enabled, see below). So the agent self-heals —
+   daemon and code-server when enabled, see below). So the agent self-heals —
    see below.
 
 `POST /api/sessions/:id/activate` **no longer exists**, and must not come back:
@@ -328,6 +331,67 @@ workspaces started afterwards.
   blocker eats it; the proxy's not-running page refreshes until Ralph answers.
   Ralph never affects readiness or liveness.
 - `RALPH_UI_PORT` is also in `k8s/networkpolicy.yaml`; change both together.
+
+## VS Code (opt-in)
+
+[code-server](https://github.com/coder/code-server) (browser VS Code) runs in
+the workspace container when the dashboard has `CODE_ENABLE=1`, on the
+checkout, proxied at `/code/<id>/` and linked as **VS Code** on the card. Off,
+nothing changes: no port is declared and no process runs. Takes effect for
+workspaces started afterwards.
+
+- **In the workspace container, not a sidecar** like Files. The point is the
+  same tree *and* the same environment as the agents: toolchains, `gh`/git
+  credentials and the scratch Postgres are all in the workspace image, and an
+  integrated terminal or language server in a sidecar image would have none
+  of them. The cost is that a workspace OOM takes the editor down too.
+- **Installed from a pinned release tarball** (`CODE_SERVER_VERSION` in the
+  Dockerfile, into `/opt/code-server`). It bundles its own node, so it neither
+  needs nor disturbs the nvm toolchain. Not the linuxserver image — that is a
+  whole s6-based container.
+- **Always on behind the flag, not lazy.** Measured on 4.141.0 (PSS, all of
+  its processes):
+
+  | state | memory |
+  |---|---|
+  | never opened | ~105 MB (~55 MB of it private; one Node HTTP server) |
+  | one tab, terminal and a Markdown preview open | ~500 MB (adds extension host, file watcher, pty host, language servers) |
+  | tab closed > 5 min | ~210 MB: the server keeps its grown heap, and the pty host keeps the terminal's shell so a reopened tab gets it back |
+
+  `--reconnection-grace-time 300` is what reaps the extension host five
+  minutes after the tab closes (VS Code's default is 3 h). Lazy start would
+  save only the first row, at the cost of an agent start path and a waiting
+  page; it would not touch the third.
+- **Seeded user settings**, written once into a `settings.json` that does not
+  exist yet, never over a user's own:
+  - `security.workspace.trust.enabled: false`. Workspace trust guards against
+    running an untrusted checkout's code, which the agents in the same pod
+    already do with full access; left on, its prompt stood between the user
+    and the integrated terminal. Installing an extension still asks to trust
+    its publisher.
+  - `chat.disableAIFeatures: true`. VS Code's built-in chat otherwise starts
+    a Copilot runtime (~100 MB) on the first connect that outlives the tab.
+    Claude and Codex are this workspace's agents and there is no Copilot
+    login.
+- **Supervised as a no-op when disabled.** `[program:code-server]` runs
+  `bootstrap/code-server.sh`, which exits 0 at once without `CODE_ENABLE`
+  (inherited from the pod env); `startsecs=0` + `exitcodes=0` make that a
+  clean `EXITED`, not a `FATAL`. Enabled, it is restarted if it crashes.
+- **The prefix is stripped — the one exception to "rewrite nothing".**
+  code-server has no base-path option and needs none: every URL it emits,
+  including its `./?folder=` redirect, is relative. So `/code/<id>/x` reaches it
+  as `/x` (`codeUpstreamPath()`), WebSocket upgrades included, and a bare
+  `/code/<id>` is redirected to `/code/<id>/` first, or those relative URLs
+  resolve against `/code/`. It probes code-server's own `/healthz`.
+- **`--auth none`.** The ingress auth plus the NetworkPolicy (port 7686) are
+  the boundary, as for ttyd and codexapp. There is no separate password.
+- **State on the repo PVC**, under `_home/code-server/` (`data/` for user
+  settings and state, `extensions/`, `config.yaml`), like `CODEX_HOME`: it
+  survives restart and replace, per repo, and is not synced through S3.
+- **Availability follows the pod** (`codeAvailable()`: a `code-ui` port on the
+  workspace container), like `filesUrl`: turning the flag off leaves a running
+  editor reachable until its pod goes. The button is enabled once the pod runs;
+  the proxy shows a self-refreshing page until code-server answers.
 
 ## Files (filebrowser sidecar)
 
@@ -631,6 +695,7 @@ narrow TOCTOU window remains.)
 | `GET` | `/terminal/:id/` | User-facing ttyd wrapper with mobile shortcut and function-key drawer; `:id` is a workspace or `config` for the shared-config shell |
 | `ALL` | `/tty/:id/*`, `/codex/:id/*`, `/config-tty/*` | Proxied (incl. WebSocket upgrade) |
 | `ALL` | `/files/:id/*` | filebrowser, proxied; `X-Auth` added to header-less GETs. Sessions carry `filesUrl` only when their pod has the sidecar |
+| `ALL` | `/code/:id/*` | code-server, proxied with the prefix stripped (incl. WebSocket upgrade); a self-refreshing page until it answers, 404 for a pod started without `CODE_ENABLE` |
 | `GET` | `/ralph/:id/*` | Ralph's web UI, proxied; 404 unless `RALPH_ENABLE`, a self-refreshing *not running yet* page until it answers |
 | `GET` | `/welcome` | The Berth landing page (`landing.html`); everything else falls through to the dashboard SPA |
 
