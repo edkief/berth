@@ -1,7 +1,8 @@
 ---
 # Ports 7681 (shell), 7682 (agent), 7684 (Codex UI), 7685 (files sidecar,
-# filebrowser --noauth) and 4280 (Ralph UI, only listening while someone runs
-# ralph) are unauthenticated inside the cluster.
+# filebrowser --noauth), 7686 (code-server --auth none, only listening with
+# CODE_ENABLE) and 4280 (Ralph UI, only listening while someone runs ralph) are
+# unauthenticated inside the cluster.
 # With one pod per workspace the exposure multiplies, so only the dashboard may
 # reach them. 4280 must match the dashboard's RALPH_UI_PORT.
 apiVersion: networking.k8s.io/v1
@@ -29,5 +30,7 @@ spec:
           port: 7684
         - protocol: TCP
           port: 7685
+        - protocol: TCP
+          port: 7686
         - protocol: TCP
           port: 4280
