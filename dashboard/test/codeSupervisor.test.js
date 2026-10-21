@@ -58,3 +58,19 @@ test('with CODE_ENABLE the script reaches code-server', () => {
         stdio: 'pipe',
     }), /code-server/);
 });
+
+test('workspace trust is seeded off once, never over settings the user has made', () => {
+    const run = (home) => assert.throws(() => execFileSync('/bin/bash', [SCRIPT], {
+        env: { PATH: '/usr/bin:/bin', CODE_ENABLE: '1', CODE_HOME: home }, stdio: 'pipe',
+    }));
+    const fresh = fs.mkdtempSync(path.join(os.tmpdir(), 'code-home-'));
+    run(fresh);
+    const seeded = JSON.parse(fs.readFileSync(path.join(fresh, 'data', 'User', 'settings.json'), 'utf8'));
+    assert.equal(seeded['security.workspace.trust.enabled'], false);
+
+    const used = fs.mkdtempSync(path.join(os.tmpdir(), 'code-home-'));
+    fs.mkdirSync(path.join(used, 'data', 'User'), { recursive: true });
+    fs.writeFileSync(path.join(used, 'data', 'User', 'settings.json'), '{"editor.fontSize": 17}');
+    run(used);
+    assert.equal(fs.readFileSync(path.join(used, 'data', 'User', 'settings.json'), 'utf8'), '{"editor.fontSize": 17}');
+});
