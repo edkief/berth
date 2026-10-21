@@ -18,6 +18,7 @@ const LABEL = {
 const WORKSPACE_CONTAINER = 'workspace';
 const FILES_CONTAINER = 'files';
 const FILES_PORT = 7685;
+const CODE_PORT = 7686;
 
 const ANN = {
     repoUrl: 'berth.kieffer.me/repo-url',
@@ -44,7 +45,7 @@ function buildWorkspacePodManifest({
     id, key, repoUrl, repoFullName, branch, baseBranch,
     newBranch = null, sessionName, pvcName, resetHard = false,
     resourceProfile = 'default', resources = cfg.workspaceResources,
-    ralph = cfg.ralph, files = cfg.files,
+    ralph = cfg.ralph, files = cfg.files, code = cfg.code,
 }) {
     const branchSlug = slug(branch, 40);
 
@@ -101,6 +102,7 @@ function buildWorkspacePodManifest({
                     { containerPort: 7682, name: 'agent' },
                     { containerPort: 7684, name: 'codex-ui' },
                     ...(ralph.enabled ? [{ containerPort: ralph.uiPort, name: 'ralph-ui' }] : []),
+                    ...(code.enabled ? [{ containerPort: CODE_PORT, name: 'code-ui' }] : []),
                 ],
                 env: [
                     { name: 'WORKSPACE_ID', value: id },
@@ -122,6 +124,9 @@ function buildWorkspacePodManifest({
                     // here, on the PVC, for the same reason.
                     { name: 'PI_CODING_AGENT_DIR', value: '/workspace/_home/pi' },
                     ...ralphEnv(id, ralph),
+                    // Read by workspace/bootstrap/code-server.sh; absent, the
+                    // supervised editor exits at once and nothing listens.
+                    ...(code.enabled ? [{ name: 'CODE_ENABLE', value: '1' }] : []),
                     { name: 'CLAUDE_CODE_VERSION', value: cfg.claudeCodeVersion },
                     { name: 'OPENCODE_VERSION', value: cfg.opencodeVersion },
                     { name: 'PI_VERSION', value: cfg.piVersion },
@@ -278,5 +283,5 @@ function workspaceContainerStatus(pod) {
 module.exports = {
     buildWorkspacePodManifest, LABEL, ANN,
     WORKSPACE_CONTAINER, workspaceContainer, workspaceContainerStatus,
-    FILES_CONTAINER, FILES_PORT,
+    FILES_CONTAINER, FILES_PORT, CODE_PORT,
 };

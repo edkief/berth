@@ -68,6 +68,7 @@ test('dashboard/.env.example defaults match the code defaults', () => {
         WORKSPACE_EPHEMERAL_LIMIT: cfg.workspaceResources.limits['ephemeral-storage'],
         MAX_WORKSPACES: cfg.maxWorkspaces,
         RALPH_UI_PORT: cfg.ralph.uiPort,
+        CODE_ENABLE: cfg.code.enabled ? 1 : 0,
         SESSIONS_CACHE_MS: cfg.sessionsCacheMs,
         PVC_CACHE_MS: cfg.pvcCacheMs,
         TARGET_CACHE_MS: cfg.targetCacheMs,
@@ -101,6 +102,7 @@ test('workspace/.env.example documents every var the pod template injects', () =
         pvcName: 'berth-ws-x-0badf00d',
         // Opt-in, so enable it here: its variables are part of the contract too.
         ralph: { enabled: true, uiPort: 4280 },
+        code: { enabled: true },
     });
 
     const injected = manifest.spec.containers[0].env.map((e) => e.name);
