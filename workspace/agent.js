@@ -10,6 +10,7 @@
  *
  *   GET /livez    the workspace is salvageable in place (see live())
  *   GET /healthz  readiness: bootstrap finished AND `claude remote` is running
+ *                 (in editor mode: bootstrap finished AND code-server answers)
  *   GET /disk     df of the workspace volume
  *   GET /session  what this pod is working on
  *
@@ -68,6 +69,15 @@ let tokenSyncRunning = false;
 let tokenSyncError = null;
 let lastTokenSync = { at: null, adopted: false, published: false, error: null };
 let claudeUrl = null;
+
+// The standalone editor (WORKSPACE_MODE=editor, k8s/editor.yaml) runs this
+// image with no bootstrap `claude remote`. Its readiness gates a real Service,
+// so it means exactly "bootstrap done and code-server answers" -- probed on a
+// timer, like Ralph, so a wedged code-server never slows a probe answer.
+const EDITOR_MODE = process.env.WORKSPACE_MODE === 'editor';
+const CODE_PORT = Number(process.env.CODE_PORT || 7686);
+const CODE_PROBE_MS = Number(process.env.CODE_PROBE_MS || 3000);
+let codeServer = { up: false, reason: 'not checked yet', checkedAt: null };
 
 // Ralph's daemon runs headless under supervisord (`[program:ralph]`), which
 // does not autostart it: the agent starts it once per container when the
@@ -382,6 +392,11 @@ function tryRelaunch() {
  */
 function health() {
     const stage = readFile(STAGE_FILE) || 'starting';
+    if (EDITOR_MODE) {
+        const h = editorHealth(stage, codeServer, readFile(ERROR_FILE));
+        if (h.ready && !wasReadyOnce()) markReady();
+        return h;
+    }
     const terminalReady = ttydRunning();
 
     if (stage === 'failed') {
@@ -471,6 +486,38 @@ function health() {
 }
 
 /**
+ * Editor-mode readiness: nothing about Claude, which here is only whatever the
+ * user runs in the editor's terminal. Pure, for the tests.
+ */
+function editorHealth(stage, code, error) {
+    if (stage === 'failed') {
+        return { ready: false, stage: 'failed', detail: tail(error || '') };
+    }
+    if (stage !== 'starting') return { ready: false, stage, detail: null };
+    if (code.up) return { ready: true, stage: 'ready', detail: null };
+    return { ready: false, stage: 'starting-editor', detail: `code-server: ${code.reason}` };
+}
+
+/** Re-read whether code-server answers its own /healthz. */
+function probeCodeServer() {
+    const checkedAt = () => new Date().toISOString();
+    const req = http.get({ host: '127.0.0.1', port: CODE_PORT, path: '/healthz', timeout: 2000 }, (res) => {
+        res.resume();
+        codeServer = res.statusCode === 200
+            ? { up: true, reason: null, checkedAt: checkedAt() }
+            : { up: false, reason: `answered ${res.statusCode}`, checkedAt: checkedAt() };
+    });
+    req.on('timeout', () => req.destroy(new Error('timed out')));
+    req.on('error', (err) => {
+        codeServer = {
+            up: false,
+            reason: err.code === 'ECONNREFUSED' ? 'not running' : `no answer (${err.code || err.message})`,
+            checkedAt: checkedAt(),
+        };
+    });
+}
+
+/**
  * Liveness. Deliberately NOT "the agent process is up" -- that answer is always
  * yes, which is why a workspace could sit 503 on readiness for 8 hours without
  * ever being restarted. Readiness gates Endpoints; only liveness restarts.
@@ -479,6 +526,9 @@ function health() {
  * been exhausted. Never fails during bootstrap: a slow clone must not be shot.
  */
 function live() {
+    // Nothing here for a restart to fix: supervisord restarts a crashed
+    // code-server, and there is no claude to lose.
+    if (EDITOR_MODE) return { ok: true, reason: 'editor mode' };
     if (!SELF_HEAL) return { ok: true, reason: 'self-heal disabled' };
     if (!wasReadyOnce()) return { ok: true, reason: 'bootstrap in progress' };
     if (claudeRemoteRunning()) return { ok: true };
@@ -518,8 +568,9 @@ function session() {
         workspaceDir: readFile(DIR_FILE),
         branch: process.env.BRANCH || null,
         sessionName: process.env.CLAUDE_SESSION_NAME || null,
+        mode: EDITOR_MODE ? 'editor' : 'workspace',
         stage: readFile(STAGE_FILE) || 'starting',
-        claudeConnected: health().ready,
+        claudeConnected: EDITOR_MODE ? null : health().ready,
         credentials: credentials(),
         tokenSync: lastTokenSync,
         ...withRalph({}),
@@ -745,6 +796,10 @@ function startServer() {
 
 if (require.main === module) {
     startServer();
+    if (EDITOR_MODE) {
+        probeCodeServer();
+        setInterval(probeCodeServer, CODE_PROBE_MS);
+    }
     if (RALPH_ENABLED) {
         const probe = () => { probeRalph(); probeRalphDaemon(); };
         probe();
@@ -753,4 +808,4 @@ if (require.main === module) {
     }
 }
 
-module.exports = { extractClaudeUrl, ralphFromStatus, parseSupervisorStatus, startServer };
+module.exports = { extractClaudeUrl, ralphFromStatus, parseSupervisorStatus, editorHealth, startServer };
