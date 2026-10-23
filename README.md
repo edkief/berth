@@ -138,6 +138,8 @@ default branch. Override with `REGISTRY=...` / `REPO_NAME=...`.
 | `FILES_ENABLE` | `1` | dashboard env (filebrowser sidecar) |
 | `FILES_IMAGE` | `filebrowser/filebrowser:v2.63.23` | dashboard env |
 | `CODE_ENABLE` | `0` | dashboard env (browser VS Code; port 7686 in `k8s/networkpolicy.yaml`) |
+| Editor host / TLS host | `code.kieffer.me` | `k8s/editor.yaml` |
+| `EDITOR_URL` | `https://code.kieffer.me` | dashboard env (header link; empty hides it) |
 
 ### 4. Deploy
 
@@ -145,7 +147,12 @@ default branch. Override with `REGISTRY=...` / `REPO_NAME=...`.
 kubectl apply -f k8s/dashboard.yaml \
                -f k8s/networkpolicy.yaml \
                -f k8s/cleanup-cronjob.yaml
+kubectl apply -f k8s/editor.yaml      # optional: the standalone editor
 ```
+
+`k8s/dashboard.yaml` also creates the cluster-scoped `berth-workspace`
+PriorityClass, which scopes the workspace quota, so applying it needs rights
+to create one.
 
 Verify RBAC before anything else — a missing Role is the most common first
 failure (the UI will tell you, but this is faster):
@@ -203,6 +210,11 @@ error rather than an obvious misconfiguration.
   credentials. Settings and extensions persist per repo under
   `/workspace/_home/code-server`. Off by default; affects workspaces started
   afterwards.
+- **Editor** — the header link (with `EDITOR_URL` set) opens the standalone
+  editor at `code.kieffer.me`: one always-on VS Code with its own volume, for
+  any repo. Clone or `gh pr checkout` from its terminal; settings, extensions
+  and clones persist. The dot shows whether it is up. It is managed with
+  `kubectl` (`k8s/editor.yaml`), not from the dashboard.
 - **Open Claude** appears once the workspace's Claude Remote session has
   actually printed a `claude.ai/code` link in its pane — the card links straight
   to that live session instead of just the terminal.
