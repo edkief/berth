@@ -69,6 +69,7 @@ test('dashboard/.env.example defaults match the code defaults', () => {
         MAX_WORKSPACES: cfg.maxWorkspaces,
         RALPH_UI_PORT: cfg.ralph.uiPort,
         CODE_ENABLE: cfg.code.enabled ? 1 : 0,
+        EDITOR_URL: cfg.editorUrl,
         SESSIONS_CACHE_MS: cfg.sessionsCacheMs,
         PVC_CACHE_MS: cfg.pvcCacheMs,
         TARGET_CACHE_MS: cfg.targetCacheMs,

@@ -117,3 +117,31 @@ test('the workspace quota counts only pods in the workspace PriorityClass', () =
     });
     assert.equal(pod.spec.priorityClassName, PRIORITY_CLASS);
 });
+
+test('editorStatus: running once a live pod is Ready; a terminating pod counts for nothing', () => {
+    const { editorStatus } = require('../lib/editor');
+    const pod = (phase, ready, extra = {}) => ({
+        metadata: { name: 'berth-editor-x', ...extra },
+        status: { phase, conditions: [{ type: 'Ready', status: ready ? 'True' : 'False' }] },
+    });
+
+    assert.equal(editorStatus([]), 'down');
+    assert.equal(editorStatus(undefined), 'down');
+    assert.equal(editorStatus([pod('Pending', false)]), 'starting');
+    assert.equal(editorStatus([pod('Running', false)]), 'starting');
+    assert.equal(editorStatus([pod('Running', true)]), 'running');
+    assert.equal(editorStatus([pod('Failed', false)]), 'down');
+    // Recreate rollout: the old pod still Ready but terminating, the new one pending.
+    assert.equal(editorStatus([pod('Running', true, { deletionTimestamp: '2026-10-23T00:00:00Z' }), pod('Pending', false)]), 'starting');
+    assert.equal(editorStatus([pod('Running', true, { deletionTimestamp: '2026-10-23T00:00:00Z' })]), 'down');
+});
+
+test('getEditor: no EDITOR_URL means no link, and no cluster call', async () => {
+    const cfg = require('../lib/config');
+    const { getEditor } = require('../lib/editor');
+    const saved = cfg.editorUrl;
+    cfg.editorUrl = '';
+    try {
+        assert.deepEqual(await getEditor(), { url: null });
+    } finally { cfg.editorUrl = saved; }
+});

@@ -155,6 +155,19 @@ async function submitSession(body) {
   }
 }
 
+// The standalone editor: shown only when the dashboard has EDITOR_URL, with
+// its pods' state as the dot. A failed read keeps the link and greys the dot.
+const EDITOR_TITLES = { running: 'Editor is running', starting: 'Editor is starting', down: 'Editor is not running', unknown: 'Editor status unknown' };
+async function loadEditor() {
+  const link = $('#editor-link');
+  let editor;
+  try { editor = await api.editor(); } catch { editor = link.hidden ? { url: null } : { url: link.href, status: 'unknown' }; }
+  link.hidden = !editor.url;
+  if (!editor.url) return;
+  link.href = editor.url; link.dataset.status = editor.status; link.title = EDITOR_TITLES[editor.status] || '';
+  link.setAttribute('aria-label', `Open editor (${(EDITOR_TITLES[editor.status] || '').toLowerCase()})`);
+}
+
 function setupTabs() { const tabs = [['storage-tab','storage-panel'],['profiles-tab','profiles-panel'],['config-tab','config-panel']]; tabs.forEach(([tabId]) => $("#" + tabId).addEventListener('click', () => { for (const [otherTab, otherPanel] of tabs) { const active = otherTab === tabId; $("#" + otherTab).classList.toggle('is-active', active); $("#" + otherTab).setAttribute('aria-selected', String(active)); $("#" + otherPanel).hidden = !active; } })); }
 
 document.querySelectorAll('[data-filter]').forEach(button => button.addEventListener('click', () => { state.filter = button.dataset.filter; document.querySelectorAll('[data-filter]').forEach(item => item.classList.toggle('is-active', item === button)); renderSessions(); }));
@@ -162,5 +175,5 @@ $('#remove-inactive-btn').addEventListener('click', removeInactive); $('#cleanup
 createSessionForm({ onSubmit: submitSession }); setupTabs();
 setupResourceProfiles({ choose, toast });
 api.info().then(data => { if (data.dashboardPod) { $('#pod-name').textContent = data.dashboardPod; $('#pod-name').hidden = false; } if (data.metricsAvailable === false) $('#metrics-hint').textContent = 'Live metrics unavailable'; }).catch(() => {});
-loadSessions(); loadResources(); loadDisk(); loadConfig(); loadToken();
-setInterval(loadResources, 5000); setInterval(loadDisk, 60000); setInterval(loadConfig, 60000); setInterval(loadToken, 300000);
+loadSessions(); loadResources(); loadDisk(); loadConfig(); loadToken(); loadEditor();
+setInterval(loadResources, 5000); setInterval(loadDisk, 60000); setInterval(loadConfig, 60000); setInterval(loadToken, 300000); setInterval(loadEditor, 30000);

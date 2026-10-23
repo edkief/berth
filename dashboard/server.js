@@ -16,6 +16,7 @@ const ttyProxy = require('./lib/ttyProxy');
 const tokenCheck = require('./lib/tokenCheck');
 const tokenRefresh = require('./lib/tokenRefresh');
 const resourceProfiles = require('./lib/resourceProfiles');
+const editor = require('./lib/editor');
 const { ValidationError, validateRepoFullName } = require('./lib/validate');
 const { isWorkspaceId } = require('./lib/naming');
 
@@ -283,6 +284,11 @@ app.get('/api/info', asyncRoute(async (req, res) => {
             storage: cfg.storageSize,
         },
     });
+}));
+
+// The standalone editor: a link and a status dot, read-only.
+app.get('/api/editor', asyncRoute(async (req, res) => {
+    res.json(await editor.getEditor());
 }));
 
 // -------------------------------------------------------- resource profiles

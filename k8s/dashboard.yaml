@@ -203,6 +203,10 @@ spec:
             # on 7686, which k8s/networkpolicy.yaml admits from here only.
             - name: CODE_ENABLE
               value: "0"
+            # The standalone editor (k8s/editor.yaml). Only a link and a
+            # status dot here; empty hides it.
+            - name: EDITOR_URL
+              value: "https://code.kieffer.me"
             - name: GITHUB_USER
               value: "edkief"
             - name: GITHUB_TOKEN
