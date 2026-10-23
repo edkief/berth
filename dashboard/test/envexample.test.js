@@ -110,6 +110,18 @@ test('workspace/.env.example documents every var the pod template injects', () =
     assert.deepEqual(undocumented, [], 'injected into workspace pods but undocumented');
 });
 
+test('workspace/.env.example documents every var k8s/editor.yaml sets', () => {
+    const documented = parseEnvFile(path.join(ROOT, 'workspace', '.env.example'));
+    const { loadAllYaml } = require('@kubernetes/client-node');
+    const docs = loadAllYaml(fs.readFileSync(path.join(ROOT, 'k8s', 'editor.yaml'), 'utf8'));
+    const deployment = docs.find((d) => d.kind === 'Deployment');
+
+    const set = deployment.spec.template.spec.containers.flatMap((c) => (c.env || []).map((e) => e.name));
+    assert.ok(set.includes('WORKSPACE_MODE'));
+    const undocumented = set.filter((v) => !documented.has(v));
+    assert.deepEqual(undocumented, [], 'set by k8s/editor.yaml but undocumented');
+});
+
 test('.env.example files carry no real secrets', () => {
     for (const f of ['dashboard/.env.example', 'workspace/.env.example']) {
         const documented = parseEnvFile(path.join(ROOT, f));

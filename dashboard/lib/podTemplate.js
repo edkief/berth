@@ -19,6 +19,9 @@ const WORKSPACE_CONTAINER = 'workspace';
 const FILES_CONTAINER = 'files';
 const FILES_PORT = 7685;
 const CODE_PORT = 7686;
+// Defined in k8s/dashboard.yaml: the scope of the berth-workspaces quota, so
+// it counts workspace pods and not the standalone editor beside them.
+const PRIORITY_CLASS = 'berth-workspace';
 
 const ANN = {
     repoUrl: 'berth.kieffer.me/repo-url',
@@ -82,6 +85,7 @@ function buildWorkspacePodManifest({
             // proxy target cache stays valid), PVC stays attached, checkout
             // survives. That is the whole point of a bare Pod here.
             restartPolicy: 'Always',
+            priorityClassName: PRIORITY_CLASS,
             terminationGracePeriodSeconds: 30,
             // Workspaces run agent-authored code and must not hold a token that
             // could create more pods.
@@ -283,5 +287,5 @@ function workspaceContainerStatus(pod) {
 module.exports = {
     buildWorkspacePodManifest, LABEL, ANN,
     WORKSPACE_CONTAINER, workspaceContainer, workspaceContainerStatus,
-    FILES_CONTAINER, FILES_PORT, CODE_PORT,
+    FILES_CONTAINER, FILES_PORT, CODE_PORT, PRIORITY_CLASS,
 };
