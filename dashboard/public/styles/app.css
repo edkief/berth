@@ -19,6 +19,15 @@ h1, h2, h3 { font-family: var(--display); font-weight: 700; }
 .header-nav a { padding: 4px 0; border-bottom: 1px solid transparent; color: var(--ink-soft); font-size: 13.5px; text-decoration: none; white-space: nowrap; }
 .header-nav a:hover { color: var(--ink); border-bottom-color: var(--starboard); }
 .header-nav__external { font-family: var(--mono); font-size: 12px !important; }
+/* The standalone editor: the dot is its pods' state, as on a card's launch
+   group -- filled running, pulsing starting, a ring down, hollow unknown. */
+.header-nav__editor { display: inline-flex; align-items: center; gap: 6px; }
+.header-nav__editor[hidden] { display: none; }
+.header-nav__editor::before { width: 6px; height: 6px; border-radius: 50%; background: transparent; box-shadow: inset 0 0 0 1px var(--muted); content: ""; }
+.header-nav__editor[data-status="running"]::before { background: var(--green); box-shadow: none; }
+.header-nav__editor[data-status="starting"]::before { background: var(--accent); box-shadow: none; animation: ralph-pulse 1.2s ease-in-out infinite; }
+.header-nav__editor[data-status="down"]::before { box-shadow: inset 0 0 0 1.5px var(--red); }
+@media (prefers-reduced-motion: reduce) { .header-nav__editor[data-status="starting"]::before { animation: none; opacity: .5; } }
 
 .meter { min-width: 110px; }
 .meter--compact { display: grid; grid-template-columns: auto auto; align-items: center; gap: .1rem .45rem; }

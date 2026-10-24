@@ -8,7 +8,7 @@ a file browser, a per-repo persistent volume, and a scratch Postgres.
 **Berth** is the product's name, and it is the *only* name it goes by:
 the dashboard's title, header and the marketing page at `/welcome`
 (`dashboard/public/landing.html` + `styles/landing.css`), the Kubernetes
-object names (`berth`, `berth-dashboard`, `berth-workspace`), the workspace
+object names (`berth`, `berth-dashboard`, `berth-workspace`, `berth-editor`), the workspace
 pod label, the registry image paths, the `berth.kieffer.me/*` annotation keys,
 and the `berth-ws-<repo>-<hash>` names `dashboard/lib/naming.js` generates for
 every workspace Pod and PVC.
@@ -55,6 +55,10 @@ Browser
                         └────────────────────────────────────────┘
 ```
 
+Beside them, outside the dashboard: the **standalone editor**, one
+always-on code-server Deployment at its own host (`k8s/editor.yaml`, see
+*Editor (standalone)* below). The dashboard only links to it.
+
 The dashboard creates Kubernetes objects; it never shells out. A runaway agent
 now OOMs its own pod instead of taking down every session and the UI with it —
 which is the reason this design replaced the previous single-pod one.
@@ -78,6 +82,8 @@ which is the reason this design replaced the previous single-pod one.
 | `server.js` `/ralph/:id` + `agent.js` `probeRalph()` | Opt-in Ralph web UI proxy, and the probe that drives its button |
 | `podTemplate.js` `filesContainer()` + `server.js` `/files/:id` | The filebrowser sidecar, and its proxy (incl. `filesToken()` in `ttyProxy.js`) |
 | `workspace/bootstrap/code-server.sh` + `server.js` `/code/:id` | Opt-in browser VS Code: its launcher (a no-op without `CODE_ENABLE`), and its prefix-stripping proxy (`codeUpstreamPath()` in `ttyProxy.js`) |
+| `k8s/editor.yaml` + `entrypoint.sh` `WORKSPACE_MODE=editor` | The standalone editor: Deployment, PVC, Service, Ingress, and the bootstrap/agent mode it runs in (`editorHealth()` in `agent.js`) |
+| `dashboard/lib/editor.js` | `editorStatus()` — the header's Editor dot from `app=berth-editor` pods; read-only |
 | `dashboard/public/js/ralph-state.mjs` | `ralphView()` — the Ralph button's state, dot and action; pure, unit-tested |
 | `dashboard/prune-pvcs.js` | PVC pruner, run by a CronJob |
 | `dashboard/public/index.html` | Single-file dashboard UI, no build step |
@@ -88,7 +94,7 @@ which is the reason this design replaced the previous single-pod one.
 | `workspace/supervisord.conf` | Runs ttyd, `codexapp` (Codex UI), the agent and Postgres; holds Ralph's daemon, which the agent starts |
 | `workspace/bootstrap/clone.sh` | Clone/refresh into `/workspace/<branch-slug>` |
 | `shared/claude-config-sync/` | S3 sync CLI, copied into **both** images |
-| `k8s/dashboard.yaml` | SA, Role, RoleBinding, PVC, ResourceQuota, Deployment, Service, Ingress |
+| `k8s/dashboard.yaml` | SA, Role, RoleBinding, PVC, PriorityClass, ResourceQuotas, Deployment, Service, Ingress |
 | `dashboard/.env.example` | Every dashboard setting; a test asserts it matches `lib/config.js` |
 | `workspace/.env.example` | The dashboard→pod env contract; a test asserts it matches `lib/podTemplate.js` |
 | `docs/codex-migration.md` | The assessment behind the Codex UI's design (auth model, why remote control doesn't port); kept as background, not current status |
@@ -338,7 +344,9 @@ workspaces started afterwards.
 the workspace container when the dashboard has `CODE_ENABLE=1`, on the
 checkout, proxied at `/code/<id>/` and linked as **VS Code** on the card. Off,
 nothing changes: no port is declared and no process runs. Takes effect for
-workspaces started afterwards.
+workspaces started afterwards. (For a laptop-like editor across every repo, see
+*Editor (standalone)* below; this one is for live inspection of an agent's
+checkout.)
 
 - **In the workspace container, not a sidecar** like Files. The point is the
   same tree *and* the same environment as the agents: toolchains, `gh`/git
@@ -392,6 +400,60 @@ workspaces started afterwards.
   workspace container), like `filesUrl`: turning the flag off leaves a running
   editor reachable until its pod goes. The button is enabled once the pod runs;
   the proxy shows a self-refreshing page until code-server answers.
+
+## Editor (standalone)
+
+One always-on code-server for the usual end of a session: the agents worked a
+branch to a PR, and it is reviewed and finished from a device. One place, any
+repo (`git clone` / `gh pr checkout` from its terminal), with settings,
+extensions and clones that persist because there is only one of it. Defined in
+`k8s/editor.yaml`, served at `code.kieffer.me`. The per-workspace editor above
+stays: this one cannot see an agent's uncommitted work, which is on another RWO
+volume.
+
+- **IaC, not dashboard-owned.** A singleton, like the dashboard: the Role
+  gains no `create` on Deployments, and the editor outlives a dashboard
+  rollout. The dashboard shows a read-only **Editor** link in its header when
+  `EDITOR_URL` is set, with a dot from its pods (`GET /api/editor`,
+  `editorStatus()`): filled running, pulsing starting, a red ring down,
+  hollow unknown. It never proxies, creates or scales it — `kubectl scale` is
+  the off switch, and scaling from the dashboard would fight the manifest and
+  race the volume-rescuer.
+- **A Deployment, unlike a workspace.** `replicas: 1` + `Recreate`
+  (RollingUpdate deadlocks on the RWO volume), so a lost node fails over: the
+  cluster's volume-rescuer clears the stale attachment, and the
+  `not-ready`/`unreachable` tolerations are 60 s so eviction does not first
+  wait out the 300 s default.
+- **Labelled `app=berth-editor`**, never `berth-workspace`, so workspace
+  listings, `MAX_WORKSPACES`, metrics and the PVC pruner skip it with no
+  special case. It also carries no `berth-workspace` PriorityClass, which is
+  what keeps it out of the workspace quota (see *Kubernetes*); its requests
+  can grow (dev servers, builds) without starving workspaces.
+- **The workspace image, `WORKSPACE_MODE=editor`.** Toolchains, `gh`,
+  Playwright and Postgres all come with it. The entrypoint skips the clone and
+  the bootstrap `claude remote`, writes `/workspace` as the checkout (so trust
+  is seeded there), implies `CODE_ENABLE`, and still pulls the shared Claude
+  config and token, so `claude` works in its terminal — and the agent's token
+  sync still publishes a renewal made there. `WORKSPACE_TERMINALS=false`
+  leaves supervisord's ttyd and codexapp stopped: nothing proxies them.
+- **Its own volume**, PVC `berth-editor` (50 Gi): clones at the root,
+  `_home/` exactly as on a workspace PVC (code-server's data and extensions
+  under `_home/code-server/`, `~/.claude`, Codex, pi, OpenCode).
+- **Readiness gates real traffic here**, unlike a workspace's, so in editor
+  mode it means only *bootstrap done and code-server answers its `/healthz`*
+  (`editorHealth()`, probed on a timer off the request path). `/livez` is
+  always 200 in editor mode: supervisord restarts a crashed code-server, and
+  there is no claude to lose.
+- **Direct ingress, not the dashboard proxy**: code-server is served at `/`
+  with nothing to strip, Service endpoints follow a rescheduled pod, it gets
+  its own origin (service worker and storage apart from the dashboard), and it
+  works while the dashboard is down. code-server runs `--auth none`, so the
+  authz-proxy middleware on its Ingress is the only gate — never drop it.
+  There is no NetworkPolicy for it.
+- `k8s/editor.yaml` env is part of the pod contract: every variable it sets
+  must be in `workspace/.env.example`, and a test fails on drift.
+- Not here: port-forward subdomains (`--proxy-domain`; path-style
+  `/proxy/<port>/` works), S3 sync of editor settings, more than one editor.
 
 ## Files (filebrowser sidecar)
 
@@ -677,6 +739,7 @@ narrow TOCTOU window remains.)
 | Method | Path | Notes |
 |---|---|---|
 | `GET` | `/api/info` | Namespace, workspace image, `metricsAvailable`, defaults |
+| `GET` | `/api/editor` | The standalone editor: `{url, status}` (`running`/`starting`/`down`/`unknown`), or `{url: null}` without `EDITOR_URL` |
 | `GET` | `/api/repos`, `/api/branches?repo=` | GitHub listing |
 | `GET` | `/api/sessions`, `/api/sessions/:id` | 30 s cache, skipped while anything is unsettled; each session carries `terminalUrl`, `codexUrl`, `filesUrl`, (once discovered) `claudeUrl`, and with Ralph enabled `ralphUrl` + `ralph` |
 | `POST` | `/api/sessions` | **202** / 400 / **409** / 429 |
@@ -718,6 +781,15 @@ RBAC is a **namespaced Role** in `dev`. Two deliberate omissions:
 `create` on pods is inherently escalation-adjacent (it can mount any Secret in
 the namespace). Keep the Role namespaced, never a ClusterRole, and keep the
 ingress auth middleware.
+
+**The quota counts workspace pods only.** A ResourceQuota cannot select by
+label, so workspace pods carry the `berth-workspace` PriorityClass (value 0, no
+preemption: it changes no scheduling) and `berth-workspaces` is scoped to it —
+the standalone editor shares the namespace and must not draw from it. A
+PriorityClass-scoped quota may track only pod resources, so the PVC count is a
+second, unscoped quota (`berth-workspace-pvcs`), which the editor's PVC does
+count against. The PriorityClass must exist before the dashboard creates a
+pod; a workspace started before it simply goes uncounted until replaced.
 
 ## Key constraints
 
@@ -763,6 +835,7 @@ NAMESPACE=dev node server.js              # runs against your kubeconfig
 ./docker-push.sh dashboard --rollout      # one, then restart the dashboard
 ./docker-push.sh workspace --latest       # force :latest off a dirty branch
 kubectl apply -f k8s/dashboard.yaml -f k8s/networkpolicy.yaml -f k8s/cleanup-cronjob.yaml
+kubectl apply -f k8s/editor.yaml          # the standalone editor (code.kieffer.me)
 ```
 
 ### Images

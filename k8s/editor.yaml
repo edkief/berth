@@ -1,0 +1,226 @@
+# The standalone editor: one always-on browser VS Code (code-server) for
+# reviewing and finishing work in any repo -- `git clone` / `gh pr checkout`
+# from its terminal -- with settings, extensions and clones on its own volume.
+#
+# The workspace image in WORKSPACE_MODE=editor: same toolchains, gh, Playwright
+# and scratch Postgres, but no repo of its own and no bootstrap `claude remote`
+# (see workspace/entrypoint.sh). The shared Claude config is still pulled, so
+# `claude` works in its terminal.
+#
+# IaC, not dashboard-owned: it is a singleton like the dashboard, so the
+# dashboard's Role gains nothing and the editor outlives a dashboard rollout.
+# The dashboard only links to it (EDITOR_URL) with a status dot read from
+# `app=berth-editor` pods.
+#
+# Labelled app=berth-editor, never berth-workspace: workspace listings,
+# MAX_WORKSPACES, metrics and the PVC pruner all select on that label, and the
+# berth-workspaces quota counts only the berth-workspace PriorityClass.
+#
+# Every env var set here must be documented in workspace/.env.example; a test
+# (dashboard/test/envexample.test.js) fails on drift.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: berth-editor
+  namespace: dev
+  labels:
+    app: berth-editor
+spec:
+  storageClassName: truenas-iscsi-ssd
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      # Several clones with node_modules, plus extensions and user data.
+      storage: 50Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: berth-editor
+  namespace: dev
+  labels:
+    app: berth-editor
+spec:
+  # One editor, one RWO volume. RollingUpdate would start the new pod before
+  # stopping the old one, and the new one can never attach the volume.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: berth-editor
+  template:
+    metadata:
+      labels:
+        app: berth-editor
+    spec:
+      hostname: berth-editor
+      # Runs whatever the user clones; must not hold a token that could create
+      # pods. Same as workspace pods.
+      automountServiceAccountToken: false
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        fsGroupChangePolicy: "OnRootMismatch"
+      # A Deployment, unlike a bare workspace Pod, is rescheduled when its
+      # node is lost; the volume-rescuer clears the stale RWO attachment.
+      # Without these the eviction first waits out the 300 s default.
+      tolerations:
+        - key: node.kubernetes.io/not-ready
+          operator: Exists
+          effect: NoExecute
+          tolerationSeconds: 60
+        - key: node.kubernetes.io/unreachable
+          operator: Exists
+          effect: NoExecute
+          tolerationSeconds: 60
+      containers:
+        - name: workspace
+          # Pin to an immutable tag once the image settles, as WORKSPACE_IMAGE.
+          image: registry.kieffer.me/berth/workspace:latest
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 7686
+              name: code-ui
+            - containerPort: 7682
+              name: agent
+          env:
+            - name: WORKSPACE_MODE
+              value: "editor"
+            - name: WORKSPACE_ID
+              value: "berth-editor"
+            - name: CLAUDE_SESSION_NAME
+              value: "berth-editor"
+            - name: CODEX_HOME
+              value: "/workspace/_home/codex"
+            - name: PI_CODING_AGENT_DIR
+              value: "/workspace/_home/pi"
+            - name: CLAUDE_CODE_VERSION
+              value: "latest"
+            - name: OPENCODE_VERSION
+              value: "latest"
+            - name: PI_VERSION
+              value: "1"
+            # Matches the dashboard's; with anything but `any`, swap the
+            # envFrom below to claude-config-s3-ro as the dashboard does.
+            - name: CONFIG_PUSH_POLICY
+              value: "any"
+            - name: AUTH_S3_KEY
+              value: "auth/token.json"
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            # For git and gh in the editor's terminal (supervisord hands it on
+            # to code-server as GH_TOKEN too).
+            - name: GITHUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: github-ssh-key
+                  key: github_token
+          envFrom:
+            - secretRef:
+                name: claude-config-s3-rw
+          # Start here and raise as the editor takes on more (dev servers,
+          # builds): it is outside the berth-workspaces quota.
+          resources:
+            requests:
+              cpu: "500m"
+              memory: 2Gi
+              ephemeral-storage: 2Gi
+            limits:
+              cpu: "4"
+              memory: 8Gi
+              ephemeral-storage: 12Gi
+          volumeMounts:
+            # Clones, plus _home/: code-server (data, extensions), Codex, pi,
+            # OpenCode and claude.json, exactly as on a workspace PVC.
+            - name: editor
+              mountPath: /workspace
+            - name: editor
+              mountPath: /home/ubuntu/.claude
+              subPath: _home/claude
+            - name: github-ssh
+              mountPath: /run/secrets/github-ssh
+              readOnly: true
+          # Unlike a workspace's, this readiness gates real Service traffic:
+          # in editor mode it means bootstrap done and code-server answering,
+          # and nothing about Claude. A cold boot pulls the image and
+          # reinstalls the CLIs, hence the generous threshold.
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: agent
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 60
+          # Always 200 in editor mode: supervisord restarts a crashed
+          # code-server. Kept so a wedged agent still restarts the container.
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: agent
+            initialDelaySeconds: 120
+            periodSeconds: 30
+            failureThreshold: 4
+      volumes:
+        - name: editor
+          persistentVolumeClaim:
+            claimName: berth-editor
+        - name: github-ssh
+          secret:
+            secretName: github-ssh-key
+            defaultMode: 0400
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: berth-editor
+  namespace: dev
+  labels:
+    app: berth-editor
+spec:
+  selector:
+    app: berth-editor
+  ports:
+    - name: http
+      protocol: TCP
+      port: 7686
+      targetPort: code-ui
+---
+# Its own host rather than a dashboard route: code-server is served at `/`
+# with nothing to strip, gets an origin of its own (service worker, storage),
+# and stays reachable while the dashboard is down. code-server runs
+# --auth none, so the authz-proxy middleware here is the only gate: never
+# drop it. `code.kieffer.me` needs a DNS record before this is applied.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: berth-editor
+  namespace: dev
+  labels:
+    app: berth-editor
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-production"
+    traefik.ingress.kubernetes.io/router.middlewares: authz-proxy-authz-reverse-proxy@kubernetescrd
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - code.kieffer.me
+      secretName: berth-editor-tls
+  rules:
+    - host: code.kieffer.me
+      http:
+        paths:
+          - pathType: Prefix
+            path: /
+            backend:
+              service:
+                name: berth-editor
+                port:
+                  name: http

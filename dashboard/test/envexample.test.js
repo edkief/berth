@@ -69,6 +69,7 @@ test('dashboard/.env.example defaults match the code defaults', () => {
         MAX_WORKSPACES: cfg.maxWorkspaces,
         RALPH_UI_PORT: cfg.ralph.uiPort,
         CODE_ENABLE: cfg.code.enabled ? 1 : 0,
+        EDITOR_URL: cfg.editorUrl,
         SESSIONS_CACHE_MS: cfg.sessionsCacheMs,
         PVC_CACHE_MS: cfg.pvcCacheMs,
         TARGET_CACHE_MS: cfg.targetCacheMs,
@@ -108,6 +109,18 @@ test('workspace/.env.example documents every var the pod template injects', () =
     const injected = manifest.spec.containers[0].env.map((e) => e.name);
     const undocumented = injected.filter((v) => !documented.has(v));
     assert.deepEqual(undocumented, [], 'injected into workspace pods but undocumented');
+});
+
+test('workspace/.env.example documents every var k8s/editor.yaml sets', () => {
+    const documented = parseEnvFile(path.join(ROOT, 'workspace', '.env.example'));
+    const { loadAllYaml } = require('@kubernetes/client-node');
+    const docs = loadAllYaml(fs.readFileSync(path.join(ROOT, 'k8s', 'editor.yaml'), 'utf8'));
+    const deployment = docs.find((d) => d.kind === 'Deployment');
+
+    const set = deployment.spec.template.spec.containers.flatMap((c) => (c.env || []).map((e) => e.name));
+    assert.ok(set.includes('WORKSPACE_MODE'));
+    const undocumented = set.filter((v) => !documented.has(v));
+    assert.deepEqual(undocumented, [], 'set by k8s/editor.yaml but undocumented');
 });
 
 test('.env.example files carry no real secrets', () => {

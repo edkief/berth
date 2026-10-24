@@ -26,6 +26,18 @@ export GITHUB_TOKEN="${GITHUB_TOKEN:-}"
 # Everything below (and the tmux server, and claude inside it) resolves
 # ~/.claude from HOME; CRI does not set it from the image user.
 export HOME="${HOME:-/home/ubuntu}"
+# `editor` is the standalone VS Code Deployment (k8s/editor.yaml): same image,
+# no repo of its own and no bootstrap `claude remote` -- code-server on the
+# whole volume is the point, and the agent judges readiness by it instead.
+export WORKSPACE_MODE="${WORKSPACE_MODE:-workspace}"
+if [ "$WORKSPACE_MODE" = "editor" ]; then
+    export CODE_ENABLE=1
+    # ttyd and codexapp are reached only through the dashboard's per-workspace
+    # proxy, which the editor has none of; supervisord leaves them stopped.
+    export WORKSPACE_TERMINALS=false
+else
+    export WORKSPACE_TERMINALS=true
+fi
 
 fail() {
     echo "$1" > "$STATE_DIR/error"
@@ -146,8 +158,14 @@ if [ ! -s /home/ubuntu/.claude/.credentials.json ]; then
 fi
 
 # ----------------------------------------------------------------- the repo
-stage cloning
-/home/ubuntu/bootstrap/clone.sh || fail "git clone failed -- see logs"
+if [ "$WORKSPACE_MODE" = "editor" ]; then
+    # Clones are the user's, made from the editor's terminal; the volume root
+    # is what code-server opens and what claude is trusted in.
+    echo /workspace > "$STATE_DIR/dir"
+else
+    stage cloning
+    /home/ubuntu/bootstrap/clone.sh || fail "git clone failed -- see logs"
+fi
 export WORKSPACE_DIR="$(cat "$STATE_DIR/dir")"
 
 node /home/ubuntu/bootstrap/seed-claude-config.js || fail "could not seed claude config"
@@ -239,12 +257,15 @@ fi
 # --------------------------------------------------------- the claude session
 # Created here rather than by the API (as the old single-pod design did), so the
 # session exists whether or not a browser is attached. ttyd then attaches to it.
+# The editor has none: claude there is whatever the user runs in its terminal.
 stage starting
-SESSION_NAME="${CLAUDE_SESSION_NAME:-workspace}"
-byobu new-session -d -s claude -c "$WORKSPACE_DIR" 2>/dev/null \
-    || echo "[entrypoint] WARN: byobu session already exists"
-byobu send-keys -t claude \
-    "claude remote --name '${SESSION_NAME}' --spawn=same-dir" Enter
+if [ "$WORKSPACE_MODE" != "editor" ]; then
+    SESSION_NAME="${CLAUDE_SESSION_NAME:-workspace}"
+    byobu new-session -d -s claude -c "$WORKSPACE_DIR" 2>/dev/null \
+        || echo "[entrypoint] WARN: byobu session already exists"
+    byobu send-keys -t claude \
+        "claude remote --name '${SESSION_NAME}' --spawn=same-dir" Enter
+fi
 
 echo "[entrypoint] bootstrap complete; handing off to supervisord"
 exec sudo -E /usr/bin/supervisord -n -c /etc/supervisor/supervisord.conf

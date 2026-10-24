@@ -74,8 +74,23 @@ spec:
     requests:
       storage: 1Gi
 ---
+# Marks the pods the dashboard creates, so the quota below can count exactly
+# those. A ResourceQuota cannot select by label, only by scope; a PriorityClass
+# is the scope that names "workspace pods" and nothing else -- the standalone
+# editor (k8s/editor.yaml) shares the namespace and must not draw from it.
+# Value 0 and no preemption: it changes no scheduling, only what is counted.
+# Cluster-scoped, and must exist before the dashboard creates a pod.
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: berth-workspace
+value: 0
+globalDefault: false
+preemptionPolicy: Never
+description: "Berth workspace pods; scopes the berth-workspaces ResourceQuota."
+---
 # Backstop for MAX_WORKSPACES: without a quota, a bug could schedule pods that
-# all sit Pending and pin storage.
+# all sit Pending and pin storage. Scoped to workspace pods (see above).
 apiVersion: v1
 kind: ResourceQuota
 metadata:
@@ -86,6 +101,21 @@ spec:
     count/pods: "12"
     requests.cpu: "6"
     requests.memory: 12Gi
+  scopeSelector:
+    matchExpressions:
+      - scopeName: PriorityClass
+        operator: In
+        values: ["berth-workspace"]
+---
+# A PriorityClass-scoped quota may only track pod resources, so the PVC count
+# is its own, namespace-wide quota. The editor's volume is one of these.
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: berth-workspace-pvcs
+  namespace: dev
+spec:
+  hard:
     persistentvolumeclaims: "12"
 ---
 apiVersion: apps/v1
@@ -173,6 +203,10 @@ spec:
             # on 7686, which k8s/networkpolicy.yaml admits from here only.
             - name: CODE_ENABLE
               value: "0"
+            # The standalone editor (k8s/editor.yaml). Only a link and a
+            # status dot here; empty hides it.
+            - name: EDITOR_URL
+              value: "https://code.kieffer.me"
             - name: GITHUB_USER
               value: "edkief"
             - name: GITHUB_TOKEN

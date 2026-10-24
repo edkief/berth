@@ -95,6 +95,10 @@ module.exports = {
         enabled: boolEnv('CODE_ENABLE', false),
     },
 
+    // The standalone editor (k8s/editor.yaml), linked from the header with a
+    // status dot. Empty hides the link; the dashboard never manages it.
+    editorUrl: env('EDITOR_URL', ''),
+
     // filebrowser, as a sidecar on the repo PVC, proxied at /files/<id>/. On
     // by default; takes effect for workspaces started after a change. Pinned:
     // upstream is archived and v2.63.23 is its last release, so a floating tag
@@ -153,5 +157,6 @@ module.exports = {
     labels: {
         app: 'berth-workspace',
         managedBy: 'berth-dashboard',
+        editor: 'berth-editor',
     },
 };
