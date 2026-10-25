@@ -61,6 +61,8 @@ module.exports = {
     opencodeVersion: env('OPENCODE_VERSION', 'latest'),
     // pi, Ralph's other harness. A range by default: Ralph accepts pi 1.x only.
     piVersion: env('PI_VERSION', '1'),
+    // IANA zone for new workspaces' TZ; empty leaves the image's UTC.
+    timezone: env('WORKSPACE_TIMEZONE', ''),
 
     storageClass: env('WORKSPACE_STORAGE_CLASS', 'truenas-iscsi-ssd'),
     storageSize: env('WORKSPACE_STORAGE_SIZE', '20Gi'),
