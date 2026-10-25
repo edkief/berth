@@ -1,5 +1,8 @@
 version: 1
 
+# workspace is too large to be built in memory-only pipeline
+storage: disk
+
 defaults:
   # Both images COPY shared/claude-config-sync/, so neither can use its own
   # subdirectory as the build context -- it has to be the repo root. The
