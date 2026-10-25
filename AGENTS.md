@@ -804,6 +804,9 @@ pod; a workspace started before it simply goes uncounted until replaced.
   Multi-Attach error` during that window is normal. The pod's Warning events are
   surfaced as `session.message` so it does not look like a hang.
 - `MAX_WORKSPACES` (default 4) returns **429**; a `ResourceQuota` is the backstop.
+- `WORKSPACE_TIMEZONE` (an IANA name, empty by default) is injected as `TZ` into
+  workspaces started afterwards; empty injects nothing and the image stays on
+  UTC. It is not validated: glibc falls back to UTC on a name it does not know.
 - ttyd is told its own base path (`TTY_BASE_PATH=/tty/<id>`) because it bakes
   that path into the JS it serves. The proxy therefore rewrites nothing — do not
   add prefix-stripping without also rewriting the response body. The

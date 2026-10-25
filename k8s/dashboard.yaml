@@ -189,6 +189,10 @@ spec:
             # Ralph accepts only pi 1.x; "1" tracks the newest of it.
             - name: PI_VERSION
               value: "1"
+            # IANA zone (e.g. Europe/Paris) set as TZ in workspaces started
+            # afterwards; empty leaves the image's UTC.
+            - name: WORKSPACE_TIMEZONE
+              value: ""
             # any | dashboard | additive -- see AGENTS.md. Flipping this and
             # restarting changes the S3 credentials handed to new workspaces.
             - name: CONFIG_PUSH_POLICY
