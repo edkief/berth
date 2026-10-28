@@ -38,7 +38,7 @@ test('code-server serves the checkout unauthenticated on 7686, state on the PVC'
     assert.match(source, /CODE_HOME="\$\{CODE_HOME:-\/workspace\/_home\/code-server\}"/);
     assert.match(source, /--user-data-dir "\$CODE_HOME\/data"/);
     assert.match(source, /--extensions-dir "\$CODE_HOME\/extensions"/);
-    assert.match(source, /--reconnection-grace-time \d+/);
+    assert.match(source, /--reconnection-grace-time "\$GRACE"/);
     assert.match(source, /"\$\{WORKSPACE_DIR:-\/workspace\}"$/m);
 });
 
@@ -57,6 +57,34 @@ test('with CODE_ENABLE the script reaches code-server', () => {
         env: { PATH: '/usr/bin:/bin', CODE_ENABLE: '1', CODE_HOME: fs.mkdtempSync(path.join(os.tmpdir(), 'code-home-')) },
         stdio: 'pipe',
     }), /code-server/);
+});
+
+/** The --reconnection-grace-time a run of the script hands code-server. */
+function graceFor(extraEnv) {
+    // A stand-in code-server that prints its arguments instead of serving.
+    const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'code-bin-'));
+    fs.writeFileSync(path.join(bin, 'code-server'), '#!/bin/sh\nprintf "%s\\n" "$@"\n', { mode: 0o755 });
+    const args = execFileSync('/bin/bash', [SCRIPT], {
+        env: {
+            PATH: `${bin}:/usr/bin:/bin`, CODE_ENABLE: '1',
+            CODE_HOME: fs.mkdtempSync(path.join(os.tmpdir(), 'code-home-')), ...extraEnv,
+        },
+        stdio: 'pipe',
+    }).toString().split('\n');
+    return args[args.indexOf('--reconnection-grace-time') + 1];
+}
+
+test('reconnect grace is 5 min in a workspace and 8 h in the standalone editor', () => {
+    assert.equal(graceFor({}), '300');
+    assert.equal(graceFor({ WORKSPACE_MODE: 'workspace' }), '300');
+    assert.equal(graceFor({ WORKSPACE_MODE: 'editor' }), '28800');
+});
+
+test('CODE_RECONNECT_GRACE overrides either default; garbage falls back to it', () => {
+    assert.equal(graceFor({ CODE_RECONNECT_GRACE: '3600' }), '3600');
+    assert.equal(graceFor({ WORKSPACE_MODE: 'editor', CODE_RECONNECT_GRACE: '600' }), '600');
+    assert.equal(graceFor({ CODE_RECONNECT_GRACE: '8h' }), '300');
+    assert.equal(graceFor({ WORKSPACE_MODE: 'editor', CODE_RECONNECT_GRACE: '-1' }), '28800');
 });
 
 test('workspace trust and built-in AI chat are seeded off once, never over settings the user has made', () => {

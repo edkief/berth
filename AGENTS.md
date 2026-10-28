@@ -366,10 +366,13 @@ checkout.)
   | one tab, terminal and a Markdown preview open | ~500 MB (adds extension host, file watcher, pty host, language servers) |
   | tab closed > 5 min | ~210 MB: the server keeps its grown heap, and the pty host keeps the terminal's shell so a reopened tab gets it back |
 
-  `--reconnection-grace-time 300` is what reaps the extension host five
-  minutes after the tab closes (VS Code's default is 3 h). Lazy start would
-  save only the first row, at the cost of an agent start path and a waiting
-  page; it would not touch the third.
+  `--reconnection-grace-time` is what reaps the extension host after the tab
+  closes (VS Code's default is 3 h). `CODE_RECONNECT_GRACE` (seconds) sets it;
+  unset, it is 300 in a workspace, where the editor is a quick look at an
+  agent's changes, and 28800 (8 h) in the standalone editor, a long-lived dev
+  environment whose terminal task must survive a laptop sleeping. Lazy start
+  would save only the first row, at the cost of an agent start path and a
+  waiting page; it would not touch the third.
 - **Seeded user settings**, written once into a `settings.json` that does not
   exist yet, never over a user's own:
   - `security.workspace.trust.enabled: false`. Workspace trust guards against
@@ -436,6 +439,8 @@ volume.
   config and token, so `claude` works in its terminal — and the agent's token
   sync still publishes a renewal made there. `WORKSPACE_TERMINALS=false`
   leaves supervisord's ttyd and codexapp stopped: nothing proxies them.
+  Its code-server keeps a closed tab's extension host and terminals for 8 h,
+  not a workspace's 5 min (`CODE_RECONNECT_GRACE` in `editor.yaml` overrides).
 - **Its own volume**, PVC `berth-editor` (50 Gi): clones at the root,
   `_home/` exactly as on a workspace PVC (code-server's data and extensions
   under `_home/code-server/`, `~/.claude`, Codex, pi, OpenCode).
