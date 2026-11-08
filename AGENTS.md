@@ -83,6 +83,7 @@ which is the reason this design replaced the previous single-pod one.
 | `podTemplate.js` `filesContainer()` + `server.js` `/files/:id` | The filebrowser sidecar, and its proxy (incl. `filesToken()` in `ttyProxy.js`) |
 | `workspace/bootstrap/code-server.sh` + `server.js` `/code/:id` | Opt-in browser VS Code: its launcher (a no-op without `CODE_ENABLE`), and its prefix-stripping proxy (`codeUpstreamPath()` in `ttyProxy.js`) |
 | `k8s/editor.yaml` + `entrypoint.sh` `WORKSPACE_MODE=editor` | The standalone editor: Deployment, PVC, Service, Ingress, and the bootstrap/agent mode it runs in (`editorHealth()` in `agent.js`) |
+| `supervisord.conf` `[program:herdr]` + `entrypoint.sh` `HERDR_SERVER` | The editor's opt-in background herdr server, its PVC state and agent integrations |
 | `dashboard/lib/editor.js` | `editorStatus()` — the header's Editor dot from `app=berth-editor` pods; read-only |
 | `dashboard/public/js/ralph-state.mjs` | `ralphView()` — the Ralph button's state, dot and action; pure, unit-tested |
 | `dashboard/prune-pvcs.js` | PVC pruner, run by a CronJob |
@@ -460,6 +461,41 @@ volume.
 - Not here: port-forward subdomains (`--proxy-domain`; path-style
   `/proxy/<port>/` works), S3 sync of editor settings, more than one editor.
 
+### herdr (editor only, `HERDR_ENABLE`)
+
+[herdr](https://github.com/herdrdev/herdr) is an agent multiplexer: its server
+owns the panes, shows each agent as working / blocked / done / idle, and
+restores the layout (resuming supported agents) after a restart. In the editor
+it is how agents keep working with **no VS Code tab open** — a VS Code
+terminal's processes die with code-server's reconnect grace or a code-server
+restart. `herdr` in any terminal attaches.
+
+- **Editor mode only, behind a flag.** `k8s/editor.yaml` sets `HERDR_ENABLE=1`;
+  `entrypoint.sh` turns that into `HERDR_SERVER=true` only when
+  `WORKSPACE_MODE=editor`, so a workspace pod never runs it whatever its env.
+  Workspaces have byobu and Claude Remote for the same job.
+- **A supervised `herdr server`, not one a client spawns.** herdr's own
+  headless mode for service setups: up from boot with nobody attached, and
+  outside code-server's process group. `[program:herdr]` follows Ralph's rules:
+  `autorestart=unexpected` + `exitcodes=0`, so `herdr server stop` stays down
+  and a crash restarts; a server already holding the socket makes it exit 1
+  and go `FATAL` after three tries. `SHELL` is set or panes get `/bin/sh`.
+- **The binary is pinned in the image** (`HERDR_VERSION`, one static release
+  asset), so it is present but idle wherever the flag is off.
+- **State on the PVC**, linked by `persist_home` only when enabled:
+  `~/.config/herdr` (config, sockets, named sessions) →
+  `_home/herdr/config`, `~/.local/state/herdr` (the restored layout) →
+  `_home/herdr/state`, `~/.herdr` (default worktrees) → `_home/herdr/home`. A
+  `config.toml` with `onboarding = false` is seeded once, never over the
+  user's.
+- **Integrations every boot, after the config pull.** `herdr integration
+  install claude|codex` add a hook that hands herdr each agent's session id,
+  for resume. They run every boot because the pull rewrites `settings.json`;
+  failure only warns. The Claude hook is **machine-local**: see the sync's
+  `settings.json` rule under *Claude config*.
+- **Never readiness or liveness.** Agents in its panes share the editor
+  container's memory limit.
+
 ## Files (filebrowser sidecar)
 
 Every workspace pod also runs [filebrowser](https://github.com/filebrowser/filebrowser)
@@ -511,6 +547,7 @@ branch checkout and `_home/`), proxied at `/files/<id>/` and linked as
   _home/codex/              ← CODEX_HOME
   _home/opencode/{data,config,state}/ ← ~/.local/share|.config|.local/state/opencode symlink here
   _home/pi/                 ← PI_CODING_AGENT_DIR (~/.pi/agent symlinks here)
+  _home/herdr/{config,state,home}/ ← editor only, with HERDR_ENABLE
   main/                     ← checkout
   feature-x/                ← checkout
 ```
@@ -565,6 +602,12 @@ cache keys are stripped (`projects`, `machineID`, `userID`, `cached*`, `*Cache`,
 `last*`, …) — 61 keys reduce to ~19, 123 KB to ~3 KB. On pull, the remote doc is
 merged *over* the local one and `projects` is preserved, so each pod keeps the
 trust entry that lets Claude start without a dialog.
+
+`settings.json` travels verbatim, with one exception: hook handlers that run
+herdr's `herdr-agent-state` script (the editor's herdr integration) point at a
+file that is not in the bundle, so they are machine-local. `push` and `status`
+leave them out, and `pull` re-appends the local ones to what it fetched. A
+`settings.json` without one is published byte for byte.
 
 **The OAuth token is not in the bundle.** It rotates on its own every few
 hours, and inside a version-counted bundle every refresh bumps
@@ -904,6 +947,10 @@ the 1.x line rather than `latest`: the Dockerfile installs `@1`, and
 range or version) on every boot unless the installed version equals it. pi
 itself has no install scripts, but two of its dependencies do (`@google/genai`,
 `protobufjs`). Like OpenCode it is a terminal tool.
+
+herdr (`herdrdev/herdr`, one static binary pinned by `HERDR_VERSION`) is in
+the image too, but only the standalone editor runs it, and only with
+`HERDR_ENABLE` — see *herdr* under *Editor (standalone)*.
 
 **npm 11 runs no install script it was not told to.** A package missing from
 `--allow-scripts` only warns (`install-scripts not yet covered by

@@ -38,6 +38,15 @@ if [ "$WORKSPACE_MODE" = "editor" ]; then
 else
     export WORKSPACE_TERMINALS=true
 fi
+# herdr (agent multiplexer) is the editor's only: there, its server keeps
+# agents running with no VS Code tab open. HERDR_SERVER is supervisord's
+# autostart for [program:herdr], so it is exported either way.
+export HERDR_SERVER=false
+if [ "$WORKSPACE_MODE" = "editor" ]; then
+    case "${HERDR_ENABLE:-}" in
+        1|true|yes|on) export HERDR_SERVER=true ;;
+    esac
+fi
 
 fail() {
     echo "$1" > "$STATE_DIR/error"
@@ -122,6 +131,18 @@ persist_home .local/state/opencode /workspace/_home/opencode/state
 # pi moves its whole ~/.pi/agent (auth, models.json, settings, sessions) with
 # PI_CODING_AGENT_DIR, set on the pod; the link covers anything that drops it.
 persist_home .pi/agent "$PI_CODING_AGENT_DIR"
+# herdr's config dir also holds its sockets and named sessions, its state dir
+# the layout it restores (and agents it resumes) after a restart, and ~/.herdr
+# its default worktrees. The first-run onboarding is skipped once, in a config
+# that is the user's from then on.
+if [ "$HERDR_SERVER" = "true" ]; then
+    persist_home .config/herdr      /workspace/_home/herdr/config
+    persist_home .local/state/herdr /workspace/_home/herdr/state
+    persist_home .herdr             /workspace/_home/herdr/home
+    if [ ! -e /workspace/_home/herdr/config/config.toml ]; then
+        echo 'onboarding = false' > /workspace/_home/herdr/config/config.toml
+    fi
+fi
 if [ ! -e "$CLAUDE_CONFIG_TARGET" ]; then
     if [ -f "$CLAUDE_CONFIG_FILE" ] && [ ! -L "$CLAUDE_CONFIG_FILE" ]; then
         mv "$CLAUDE_CONFIG_FILE" "$CLAUDE_CONFIG_TARGET"
@@ -149,6 +170,17 @@ fi
 # path, so expose the same files there rather than maintaining a second copy.
 /home/ubuntu/bootstrap/link-shared-skills.sh \
     || echo "[entrypoint] WARN: shared skills could not be linked for Codex"
+
+# herdr's Claude and Codex integrations: a hook that gives herdr each agent's
+# session identity, so a restarted server can resume it. Every boot, after the
+# pull: the pull rewrites settings.json, and install is idempotent. The Claude
+# entries are machine-local -- claude-config-sync never pushes them.
+if [ "$HERDR_SERVER" = "true" ]; then
+    for agent in claude codex; do
+        herdr integration install "$agent" >/dev/null \
+            || echo "[entrypoint] WARN: herdr $agent integration not installed"
+    done
+fi
 
 # The pull is the only thing that can supply credentials, so an empty config
 # here means claude will start at a login prompt. Say so in the log rather than
