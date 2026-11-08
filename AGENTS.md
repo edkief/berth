@@ -39,6 +39,7 @@ Browser
 │   /files/<id>/*  HTTP proxy (sidecar)     │────┤
 │   /code/<id>/*   HTTP+WS proxy (opt-in)   │────┤
 │   /config-tty/   shared-config shell      │    │
+│   /editor-tty/*  HTTP+WS proxy            │    │──── berth-editor Service :7681 (herdr ttyd)
 └───────────────────────────────────────────┘    │
                                                   ▼
                         ┌────────────────────────────────────────┐
@@ -57,7 +58,8 @@ Browser
 
 Beside them, outside the dashboard: the **standalone editor**, one
 always-on code-server Deployment at its own host (`k8s/editor.yaml`, see
-*Editor (standalone)* below). The dashboard only links to it.
+*Editor (standalone)* below). The dashboard links to it, and proxies one thing
+into it: the herdr terminal's ttyd (`:7681`, through its Service).
 
 The dashboard creates Kubernetes objects; it never shells out. A runaway agent
 now OOMs its own pod instead of taking down every session and the UI with it —
@@ -84,7 +86,7 @@ which is the reason this design replaced the previous single-pod one.
 | `workspace/bootstrap/code-server.sh` + `server.js` `/code/:id` | Opt-in browser VS Code: its launcher (a no-op without `CODE_ENABLE`), and its prefix-stripping proxy (`codeUpstreamPath()` in `ttyProxy.js`) |
 | `k8s/editor.yaml` + `entrypoint.sh` `WORKSPACE_MODE=editor` | The standalone editor: Deployment, PVC, Service, Ingress, and the bootstrap/agent mode it runs in (`editorHealth()` in `agent.js`) |
 | `supervisord.conf` `[program:herdr]` + `entrypoint.sh` `HERDR_SERVER` | The editor's opt-in background herdr server, its PVC state and agent integrations |
-| `dashboard/lib/editor.js` | `editorStatus()` — the header's Editor dot from `app=berth-editor` pods; read-only |
+| `dashboard/lib/editor.js` | `editorStatus()` — the header's Editor dot from `app=berth-editor` pods; `editorTerminal()` — whether they run the herdr terminal; the `/editor-tty` route constants |
 | `dashboard/public/js/ralph-state.mjs` | `ralphView()` — the Ralph button's state, dot and action; pure, unit-tested |
 | `dashboard/prune-pvcs.js` | PVC pruner, run by a CronJob |
 | `dashboard/public/index.html` | Single-file dashboard UI, no build step |
@@ -420,9 +422,10 @@ volume.
   rollout. The dashboard shows a read-only **Editor** link in its header when
   `EDITOR_URL` is set, with a dot from its pods (`GET /api/editor`,
   `editorStatus()`): filled running, pulsing starting, a red ring down,
-  hollow unknown. It never proxies, creates or scales it — `kubectl scale` is
-  the off switch, and scaling from the dashboard would fight the manifest and
-  race the volume-rescuer.
+  hollow unknown. It never creates or scales it — `kubectl scale` is the off
+  switch, and scaling from the dashboard would fight the manifest and race the
+  volume-rescuer. The one thing it proxies is the herdr terminal (see *herdr*
+  below).
 - **A Deployment, unlike a workspace.** `replicas: 1` + `Recreate`
   (RollingUpdate deadlocks on the RWO volume), so a lost node fails over: the
   cluster's volume-rescuer clears the stale attachment, and the
@@ -439,7 +442,8 @@ volume.
   is seeded there), implies `CODE_ENABLE`, and still pulls the shared Claude
   config and token, so `claude` works in its terminal — and the agent's token
   sync still publishes a renewal made there. `WORKSPACE_TERMINALS=false`
-  leaves supervisord's ttyd and codexapp stopped: nothing proxies them.
+  leaves supervisord's ttyd and codexapp stopped: nothing proxies them (the
+  herdr terminal is a separate program on ttyd's port, see below).
   Its code-server keeps a closed tab's extension host and terminals for 8 h,
   not a workspace's 5 min (`CODE_RECONNECT_GRACE` in `editor.yaml` overrides).
 - **Its own volume**, PVC `berth-editor` (50 Gi): clones at the root,
@@ -455,7 +459,13 @@ volume.
   its own origin (service worker and storage apart from the dashboard), and it
   works while the dashboard is down. code-server runs `--auth none`, so the
   authz-proxy middleware on its Ingress is the only gate — never drop it.
-  There is no NetworkPolicy for it.
+- **Its NetworkPolicy** (`berth-editor-ingress` in `k8s/networkpolicy.yaml`)
+  is what stops a pod inside the cluster — a workspace's agent, say — from
+  reaching those unauthenticated ports past the ingress: 7686 only from k3s's
+  Traefik (`kube-system`, `app.kubernetes.io/name=traefik`), 7681 only from
+  the dashboard, the agent from nobody (kubelet probes come from the node,
+  which the CNI admits, as for workspaces). Apply it before `editor.yaml`. #13
+  shipped without one; this reverses that.
 - `k8s/editor.yaml` env is part of the pod contract: every variable it sets
   must be in `workspace/.env.example`, and a test fails on drift.
 - Not here: port-forward subdomains (`--proxy-domain`; path-style
@@ -495,6 +505,24 @@ restart. `herdr` in any terminal attaches.
   `settings.json` rule under *Claude config*.
 - **Never readiness or liveness.** Agents in its panes share the editor
   container's memory limit.
+- **A dashboard terminal into it, `/terminal/editor/`.** A VS Code terminal
+  on a phone cannot send herdr's `Ctrl+B` prefix; the dashboard's wrapper and
+  key drawer can. `[program:herdr-tty]` is a second ttyd on 7681 whose command
+  is `herdr` (a client attaching to the server, so every tab shares one
+  session), gated on `HERDR_SERVER` like the server; the workspace ttyd is off
+  in editor mode, so the two never share the port. `editor.yaml` sets
+  `TTY_BASE_PATH=/editor-tty` (`EDITOR_TTY_BASE` in `lib/editor.js`; a test
+  holds them equal) and exposes `tty` on its Service.
+  - **A fixed target, like the config shell's**: the dashboard proxies
+    `/editor-tty/*` (HTTP and WebSocket, nothing rewritten) to
+    `berth-editor:7681`, the Service, which follows a rescheduled pod. It is
+    probed first (`resolveFixedTarget()` in `ttyProxy.js`, cached like a pod
+    target and dropped on a proxy error), so a down editor gets a
+    self-refreshing page, not a hang. Without `EDITOR_URL` both routes 404.
+  - **The header's herdr link** appears only when `/api/editor` reports
+    `terminalUrl`: a live editor pod with `HERDR_ENABLE` and a `tty` port
+    (`editorTerminal()`, read from the pod like `codeAvailable()`). It shares
+    the Editor dot and has no href unless the editor is running.
 
 ## Files (filebrowser sidecar)
 
@@ -787,7 +815,7 @@ narrow TOCTOU window remains.)
 | Method | Path | Notes |
 |---|---|---|
 | `GET` | `/api/info` | Namespace, workspace image, `metricsAvailable`, defaults |
-| `GET` | `/api/editor` | The standalone editor: `{url, status}` (`running`/`starting`/`down`/`unknown`), or `{url: null}` without `EDITOR_URL` |
+| `GET` | `/api/editor` | The standalone editor: `{url, status, terminalUrl}` (`running`/`starting`/`down`/`unknown`; `terminalUrl` is `/terminal/editor/` when it runs herdr, else null), or `{url: null}` without `EDITOR_URL` |
 | `GET` | `/api/repos`, `/api/branches?repo=` | GitHub listing |
 | `GET` | `/api/sessions`, `/api/sessions/:id` | 30 s cache, skipped while anything is unsettled; each session carries `terminalUrl`, `codexUrl`, `filesUrl`, (once discovered) `claudeUrl`, and with Ralph enabled `ralphUrl` + `ralph` |
 | `POST` | `/api/sessions` | **202** / 400 / **409** / 429 |
@@ -803,8 +831,9 @@ narrow TOCTOU window remains.)
 | `GET` | `/api/config/status` · `POST /api/config/push` | Config sync |
 | `GET` | `/api/config/token` | Watchdog verdict + auto-refresh state; `?fresh=1` re-checks now |
 | `POST` | `/api/config/token/refresh` | Run a maintenance pass now; `?force=1` renews even when not due |
-| `GET` | `/terminal/:id/` | User-facing ttyd wrapper with mobile shortcut and function-key drawer; `:id` is a workspace or `config` for the shared-config shell |
+| `GET` | `/terminal/:id/` | User-facing ttyd wrapper with mobile shortcut and function-key drawer; `:id` is a workspace, `config` for the shared-config shell, or `editor` for the standalone editor's herdr (404 without `EDITOR_URL`) |
 | `ALL` | `/tty/:id/*`, `/codex/:id/*`, `/config-tty/*` | Proxied (incl. WebSocket upgrade) |
+| `ALL` | `/editor-tty/*` | The editor's herdr ttyd, via its Service (incl. WebSocket upgrade); a self-refreshing page until it answers, 404 without `EDITOR_URL` |
 | `ALL` | `/files/:id/*` | filebrowser, proxied; `X-Auth` added to header-less GETs. Sessions carry `filesUrl` only when their pod has the sidecar |
 | `ALL` | `/code/:id/*` | code-server, proxied with the prefix stripped (incl. WebSocket upgrade); a self-refreshing page until it answers, 404 for a pod started without `CODE_ENABLE` |
 | `GET` | `/ralph/:id/*` | Ralph's web UI, proxied; 404 unless `RALPH_ENABLE`, a self-refreshing *not running yet* page until it answers |
@@ -886,7 +915,7 @@ NAMESPACE=dev node server.js              # runs against your kubeconfig
 ./docker-push.sh dashboard --rollout      # one, then restart the dashboard
 ./docker-push.sh workspace --latest       # force :latest off a dirty branch
 kubectl apply -f k8s/dashboard.yaml -f k8s/networkpolicy.yaml -f k8s/cleanup-cronjob.yaml
-kubectl apply -f k8s/editor.yaml          # the standalone editor (code.kieffer.me)
+kubectl apply -f k8s/editor.yaml          # the standalone editor (code.kieffer.me), after networkpolicy.yaml
 ```
 
 ### Images
