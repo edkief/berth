@@ -15,6 +15,7 @@ test('workspace proxies are registered before the JSON body parser', () => {
     assert.ok(parser > source.indexOf("app.use('/files/:id'"));
     assert.ok(parser > source.indexOf("app.use('/code/:id'"));
     assert.ok(parser > source.indexOf("app.use('/config-tty'"));
+    assert.ok(parser > source.indexOf('app.use(editor.EDITOR_TTY_BASE'));
     assert.ok(parser < source.indexOf("app.get('/api/config/status'"));
 });
 
@@ -25,7 +26,7 @@ test('terminal shell route is registered before the dashboard SPA fallback', () 
 
 test('the config shell is served through the terminal chrome, not raw ttyd', () => {
     const source = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
-    assert.match(source, /req\.params\.id !== 'config'/);
+    assert.match(source, /const known = id === 'config' \|\|/);
 
     const dashboard = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
     assert.ok(!dashboard.includes('href="/config-tty/"'), 'link the wrapper, not the raw ttyd base path');
@@ -33,6 +34,14 @@ test('the config shell is served through the terminal chrome, not raw ttyd', () 
 
     const shell = fs.readFileSync(path.join(__dirname, '..', 'public', 'js', 'terminal-shortcuts.mjs'), 'utf8');
     assert.ok(shell.includes("'/config-tty/'"), 'the wrapper must know where to point its iframe');
+});
+
+test("the editor's herdr terminal is served through the same chrome", () => {
+    const source = fs.readFileSync(path.join(__dirname, '..', 'server.js'), 'utf8');
+    assert.match(source, /id === 'editor' && cfg\.editorUrl/);
+    const shell = fs.readFileSync(path.join(__dirname, '..', 'public', 'js', 'terminal-shortcuts.mjs'), 'utf8');
+    assert.ok(shell.includes("editor: '/editor-tty/'"), 'the wrapper must know where to point its iframe');
+    assert.ok(shell.includes('config|editor|berth-ws-'));
 });
 
 test('unversioned assets are served with a revalidating cache header', () => {

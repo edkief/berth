@@ -81,6 +81,25 @@ async function resolveTarget(id, { port = TTY_PORT, healthPath = null } = {}) {
 }
 
 /**
+ * A fixed upstream (a Service, not a pod), proven up by a probe before it is
+ * used, and cached like a pod target -- so a proxy error's invalidateTarget()
+ * forgets it too. A miss is { notReady: true }, never a request left to hang
+ * on a host that is not answering.
+ */
+async function resolveFixedTarget(id, host, port, healthPath) {
+    const key = cacheKey(id, port);
+    const hit = targetCache.get(key);
+    if (hit && hit.expiresAt > Date.now()) return hit;
+    if (!await probeHttp(host, port, healthPath)) {
+        targetCache.delete(key);
+        return { notReady: true };
+    }
+    const target = { id, ip: host, port, expiresAt: Date.now() + cfg.targetCacheMs };
+    targetCache.set(key, target);
+    return target;
+}
+
+/**
  * A filebrowser token for this workspace's sidecar, for GETs that carry none.
  *
  * filebrowser's UI sends X-Auth on its API calls, but downloads and previews
@@ -170,6 +189,11 @@ function matchWorkspaceUpgrade(url) {
     return null;
 }
 
+/** The editor's herdr terminal, at its fixed base path (see lib/editor.js). */
+function matchEditorUpgrade(url, base) {
+    return url === base || url.startsWith(`${base}/`) || url.startsWith(`${base}?`);
+}
+
 function escapeHtml(s) {
     return String(s).replace(/[&<>"]/g, (c) => (
         { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -228,6 +252,20 @@ function codeNotRunningPage(id) {
             `<p>The editor starts with the workspace; this page opens it as soon as it ` +
             `answers. If it never does, its log is <code>/var/log/supervisor/code-server.log</code> ` +
             `in the <a href="/terminal/${escapeHtml(id)}/">workspace terminal</a>.</p>` +
+            `<p style="opacity:.6">This page refreshes automatically.</p>` +
+            `<p><a href="/">Back to the dashboard</a></p>`,
+    });
+}
+
+function editorTerminalNotRunningPage(editorUrl) {
+    return page({
+        title: 'herdr is not answering',
+        refresh: 3,
+        body: `<h1>The herdr terminal is not answering yet</h1>` +
+            `<p>It runs in the standalone editor when that has <code>HERDR_ENABLE</code>. ` +
+            `If the editor is starting, this page opens the terminal as soon as it answers. ` +
+            `If it never does, its log is <code>/var/log/supervisor/herdr-tty.log</code> ` +
+            (editorUrl ? `in the <a href="${escapeHtml(editorUrl)}">editor</a>'s terminal.</p>` : 'in the editor.</p>') +
             `<p style="opacity:.6">This page refreshes automatically.</p>` +
             `<p><a href="/">Back to the dashboard</a></p>`,
     });
@@ -302,8 +340,8 @@ function proxyUpgrade(req, socket, head, target, { path = req.url } = {}) {
 }
 
 module.exports = {
-    resolveTarget, invalidateTarget, proxyRequest, proxyUpgrade,
-    notFoundPage, notReadyPage, ralphNotRunningPage, codeNotRunningPage,
+    resolveTarget, resolveFixedTarget, invalidateTarget, proxyRequest, proxyUpgrade,
+    notFoundPage, notReadyPage, ralphNotRunningPage, codeNotRunningPage, editorTerminalNotRunningPage,
     targetCache, TTY_PORT, CODEX_PORT, FILES_PORT, CODE_PORT,
-    probeHttp, isSameOriginUpgrade, matchWorkspaceUpgrade, codeUpstreamPath, filesToken, filesTokens,
+    probeHttp, isSameOriginUpgrade, matchWorkspaceUpgrade, matchEditorUpgrade, codeUpstreamPath, filesToken, filesTokens,
 };

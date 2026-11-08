@@ -171,3 +171,40 @@ test('k8s/networkpolicy.yaml: the editor admits code-server from Traefik, ttyd f
     assert.equal(ports['code-ui'], 7686);
     assert.equal(ports.tty, 7681);
 });
+
+test('editorTerminal: a live pod started with HERDR_ENABLE and a tty port', () => {
+    const { editorTerminal } = require('../lib/editor');
+    const pod = ({ flag = '1', tty = true, phase = 'Running', deleting = false } = {}) => ({
+        metadata: deleting ? { deletionTimestamp: new Date() } : {},
+        status: { phase },
+        spec: {
+            containers: [{
+                name: 'workspace',
+                ports: [{ name: 'code-ui', containerPort: 7686 }, ...(tty ? [{ name: 'tty', containerPort: 7681 }] : [])],
+                env: flag === null ? [] : [{ name: 'HERDR_ENABLE', value: flag }],
+            }],
+        },
+    });
+    assert.equal(editorTerminal([]), false);
+    assert.equal(editorTerminal(undefined), false);
+    assert.equal(editorTerminal([pod()]), true);
+    assert.equal(editorTerminal([pod({ flag: 'true' })]), true);
+    assert.equal(editorTerminal([pod({ flag: '0' })]), false);
+    assert.equal(editorTerminal([pod({ flag: null })]), false);
+    // A manifest from before #20 declares no tty port: nothing listens there.
+    assert.equal(editorTerminal([pod({ tty: false })]), false);
+    assert.equal(editorTerminal([pod({ deleting: true })]), false);
+    assert.equal(editorTerminal([pod({ phase: 'Failed' })]), false);
+    // A Recreate rollout: the old pod terminating, the new one coming up.
+    assert.equal(editorTerminal([pod({ deleting: true }), pod({ phase: 'Pending' })]), true);
+});
+
+test("the dashboard's editor terminal route is the base path editor.yaml gives ttyd", () => {
+    const { EDITOR_TTY_BASE, EDITOR_TTY_PORT, EDITOR_SERVICE } = require('../lib/editor');
+    const docs = manifests('editor.yaml');
+    const c = docs.find((x) => x.kind === 'Deployment').spec.template.spec.containers[0];
+    assert.equal(c.env.find((e) => e.name === 'TTY_BASE_PATH').value, EDITOR_TTY_BASE);
+    const svc = docs.find((x) => x.kind === 'Service');
+    assert.equal(svc.metadata.name, EDITOR_SERVICE);
+    assert.equal(svc.spec.ports.find((p) => p.name === 'tty').port, EDITOR_TTY_PORT);
+});
