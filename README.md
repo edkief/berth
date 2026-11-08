@@ -214,7 +214,10 @@ error rather than an obvious misconfiguration.
   editor at `code.kieffer.me`: one always-on VS Code with its own volume, for
   any repo. Clone or `gh pr checkout` from its terminal; settings, extensions
   and clones persist. The dot shows whether it is up. It is managed with
-  `kubectl` (`k8s/editor.yaml`), not from the dashboard.
+  `kubectl` (`k8s/editor.yaml`), not from the dashboard. With `HERDR_ENABLE`
+  (on in the manifest) it also runs a background [herdr](https://github.com/herdrdev/herdr)
+  server: type `herdr` in a terminal, start agents in its panes, and they keep
+  working after the tab closes.
 - **Open Claude** appears once the workspace's Claude Remote session has
   actually printed a `claude.ai/code` link in its pane — the card links straight
   to that live session instead of just the terminal.
