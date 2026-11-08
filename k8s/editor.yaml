@@ -105,6 +105,10 @@ spec:
               value: "latest"
             - name: PI_VERSION
               value: "1"
+            # Background herdr server for agents (attach with `herdr`); "0"
+            # turns it off at the next restart.
+            - name: HERDR_ENABLE
+              value: "1"
             # Matches the dashboard's; with anything but `any`, swap the
             # envFrom below to claude-config-s3-ro as the dashboard does.
             - name: CONFIG_PUSH_POLICY

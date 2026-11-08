@@ -58,6 +58,13 @@ RUN curl -fsSL -o /tmp/code-server.tar.gz \
     && rm /tmp/code-server.tar.gz \
     && ln -s /opt/code-server/bin/code-server /usr/local/bin/code-server
 
+# herdr (agent multiplexer), the standalone editor's only, behind HERDR_ENABLE:
+# a single static binary. Pinned: bump deliberately.
+ARG HERDR_VERSION=0.9.5
+RUN curl -fsSL -o /usr/local/bin/herdr \
+        "https://github.com/herdrdev/herdr/releases/download/v${HERDR_VERSION}/herdr-linux-x86_64" \
+    && chmod +x /usr/local/bin/herdr
+
 RUN echo "ubuntu ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
 USER ubuntu
