@@ -95,3 +95,41 @@ test('the image pins herdr, and k8s/editor.yaml turns it on', () => {
     const c = d.spec.template.spec.containers.find((x) => x.name === 'workspace');
     assert.equal(c.env.find((e) => e.name === 'HERDR_ENABLE')?.value, '1');
 });
+
+/** A `[program:<name>]` section of the workspace's supervisord config, as key=value pairs. */
+function program(name) {
+    const source = fs.readFileSync(path.join(WORKSPACE, 'supervisord.conf'), 'utf8');
+    const match = source.match(new RegExp(`^\\[program:${name}\\]\\n([\\s\\S]*?)(?=^\\[|(?![\\s\\S]))`, 'm'));
+    assert.ok(match, `[program:${name}] is missing`);
+    return Object.fromEntries(match[1].split('\n')
+        .filter((line) => /^\w+=/.test(line))
+        .map((line) => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)]));
+}
+
+test('the herdr terminal is a ttyd running herdr, gated like the server', () => {
+    const p = program('herdr-tty');
+    assert.equal(p.command, 'ttyd -p 7681 -b "%(ENV_TTY_BASE_PATH)s" -W herdr');
+    assert.equal(p.user, 'ubuntu');
+    assert.equal(p.autostart, '%(ENV_HERDR_SERVER)s');
+    assert.match(p.environment, /SHELL="\/bin\/bash"/);
+    // It shares 7681 with the workspace terminal, which must never run beside
+    // it: that one is off in editor mode, this one everywhere else.
+    assert.equal(program('ttyd').autostart, '%(ENV_WORKSPACE_TERMINALS)s');
+    assert.match(program('ttyd').command, /^ttyd -p 7681 /);
+});
+
+test('k8s/editor.yaml serves the herdr terminal under the dashboard route', () => {
+    const docs = loadAllYaml(fs.readFileSync(path.join(ROOT, 'k8s', 'editor.yaml'), 'utf8'));
+    const d = docs.find((doc) => doc.kind === 'Deployment');
+    const c = d.spec.template.spec.containers.find((x) => x.name === 'workspace');
+    assert.equal(c.env.find((e) => e.name === 'TTY_BASE_PATH')?.value, '/editor-tty');
+    assert.deepEqual(c.ports.find((p) => p.name === 'tty'), { containerPort: 7681, name: 'tty' });
+
+    const svc = docs.find((doc) => doc.kind === 'Service');
+    const tty = svc.spec.ports.find((p) => p.name === 'tty');
+    assert.equal(tty.port, 7681);
+    assert.equal(tty.targetPort, 'tty');
+    // The Ingress still routes only code-server.
+    const ing = docs.find((doc) => doc.kind === 'Ingress');
+    assert.equal(ing.spec.rules[0].http.paths[0].backend.service.port.name, 'http');
+});
