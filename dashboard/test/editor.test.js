@@ -145,3 +145,29 @@ test('getEditor: no EDITOR_URL means no link, and no cluster call', async () => 
         assert.deepEqual(await getEditor(), { url: null });
     } finally { cfg.editorUrl = saved; }
 });
+
+test('k8s/networkpolicy.yaml: the editor admits code-server from Traefik, ttyd from the dashboard, nothing else', () => {
+    const policy = manifests('networkpolicy.yaml').find((d) => d.metadata.name === 'berth-editor-ingress');
+    assert.ok(policy, 'berth-editor-ingress is missing');
+    assert.deepEqual(policy.spec.podSelector, { matchLabels: { app: 'berth-editor' } });
+    assert.deepEqual(policy.spec.policyTypes, ['Ingress']);
+
+    // The client library types `from` as `_from` (a reserved word).
+    const rules = policy.spec.ingress.map((r) => ({ from: r._from ?? r.from, ports: r.ports.map((p) => p.port) }));
+    assert.deepEqual(rules, [
+        {
+            from: [{
+                namespaceSelector: { matchLabels: { 'kubernetes.io/metadata.name': 'kube-system' } },
+                podSelector: { matchLabels: { 'app.kubernetes.io/name': 'traefik' } },
+            }],
+            ports: [7686],
+        },
+        { from: [{ podSelector: { matchLabels: { app: 'berth-dashboard' } } }], ports: [7681] },
+    ]);
+
+    // The ports it guards are the ones editor.yaml declares.
+    const d = manifests('editor.yaml').find((x) => x.kind === 'Deployment');
+    const ports = Object.fromEntries(d.spec.template.spec.containers[0].ports.map((p) => [p.name, p.containerPort]));
+    assert.equal(ports['code-ui'], 7686);
+    assert.equal(ports.tty, 7681);
+});
