@@ -72,6 +72,90 @@ test('a strip/merge round-trip is stable and keeps the local trust map', () => {
     assert.deepEqual(sync.stripClaudeJson(merged), published);
 });
 
+// herdr's Claude integration, exactly as `herdr integration install claude`
+// writes it (src/integration/claude_settings.rs, v0.9.5).
+const HERDR_GROUP = {
+    matcher: '^(startup|resume|clear|compact|fork)$',
+    hooks: [{ type: 'command', command: "bash '/home/ubuntu/.claude/hooks/herdr-agent-state.sh' session", timeout: 10 }],
+};
+const OWN_GROUP = { matcher: 'startup', hooks: [{ type: 'command', command: 'echo hi' }] };
+
+test('push strips herdr hook handlers from settings.json and keeps everything else', () => {
+    const local = {
+        model: 'opus',
+        hooks: {
+            SessionStart: [OWN_GROUP, HERDR_GROUP],
+            Stop: [{ hooks: [{ type: 'command', command: 'notify' }] }],
+        },
+    };
+    assert.deepEqual(sync.stripSettings(local), {
+        model: 'opus',
+        hooks: { SessionStart: [OWN_GROUP], Stop: local.hooks.Stop },
+    });
+    // A group that mixes both keeps its other handlers.
+    const mixed = { hooks: { SessionStart: [{ ...HERDR_GROUP, hooks: [...HERDR_GROUP.hooks, OWN_GROUP.hooks[0]] }] } };
+    assert.deepEqual(sync.stripSettings(mixed).hooks.SessionStart[0].hooks, OWN_GROUP.hooks);
+    // Emptied by the strip: the event and then `hooks` go too.
+    assert.deepEqual(sync.stripSettings({ model: 'x', hooks: { SessionStart: [HERDR_GROUP] } }), { model: 'x' });
+});
+
+test('settings.json without a herdr hook is published byte for byte', () => {
+    for (const text of ['{"model":"opus"}', '{\n  "hooks": {"Stop": []}\n}\n', 'not json', '']) {
+        assert.equal(sync.publishedSettingsText(text), text);
+    }
+    const withHerdr = JSON.stringify({ model: 'opus', hooks: { SessionStart: [HERDR_GROUP] } });
+    assert.deepEqual(JSON.parse(sync.publishedSettingsText(withHerdr)), { model: 'opus' });
+});
+
+test("pull keeps this machine's herdr hooks, and a round-trip is stable", () => {
+    const editor = { model: 'old', hooks: { SessionStart: [HERDR_GROUP] } };
+    const published = { model: 'opus', hooks: { SessionStart: [OWN_GROUP] } };
+
+    const merged = sync.mergeSettings(editor, published);
+    assert.equal(merged.model, 'opus', 'the remote wins for everything else');
+    assert.deepEqual(merged.hooks.SessionStart, [OWN_GROUP, HERDR_GROUP]);
+    assert.deepEqual(sync.stripSettings(merged), published);
+    // Pulling again does not duplicate the local hooks.
+    assert.deepEqual(sync.mergeSettings(merged, published), merged);
+
+    // A machine without herdr gets the remote's bytes unchanged.
+    const remoteText = JSON.stringify(published);
+    assert.equal(sync.pulledSettingsText(null, remoteText), remoteText);
+    assert.equal(sync.pulledSettingsText('{"model":"x"}', remoteText), remoteText);
+    assert.equal(sync.pulledSettingsText('not json', remoteText), remoteText);
+    assert.deepEqual(JSON.parse(sync.pulledSettingsText(JSON.stringify(editor), remoteText)), merged);
+});
+
+test('push publishes settings.json without the herdr hook, leaving the local file alone', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'settingspush-'));
+    const bin = path.join(dir, 'bin');
+    const out = path.join(dir, 'out');
+    fs.mkdirSync(bin);
+    fs.mkdirSync(out);
+    fs.mkdirSync(path.join(dir, '.claude'));
+    const local = { model: 'opus', hooks: { SessionStart: [OWN_GROUP, HERDR_GROUP] } };
+    const settings = path.join(dir, '.claude', 'settings.json');
+    fs.writeFileSync(settings, JSON.stringify(local));
+    // An empty remote; `copyto` captures each published object by its name.
+    fs.writeFileSync(path.join(bin, 'rclone'), [
+        '#!/bin/sh',
+        'op=$3; src=$4; dst=$5',
+        `[ "$op" = copyto ] && cp "$src" "${out}/$(basename "$dst")"`,
+        'exit 0',
+    ].join('\n'), { mode: 0o755 });
+
+    execFileSync(process.execPath, [MODULE, 'push'], {
+        env: { ...process.env, HOME: dir, CLAUDE_CONFIG_DIR: path.join(dir, '.claude'),
+               CLAUDE_JSON_PATH: path.join(dir, '.claude.json'),
+               PATH: `${bin}:${process.env.PATH}`, S3_ENDPOINT: 'http://s3.test',
+               S3_ACCESS_KEY_ID: 'k', S3_SECRET_ACCESS_KEY: 's' },
+        stdio: 'pipe',
+    });
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(out, 'settings.json'), 'utf8')),
+        { model: 'opus', hooks: { SessionStart: [OWN_GROUP] } });
+    assert.deepEqual(JSON.parse(fs.readFileSync(settings, 'utf8')), local);
+});
+
 test('an atomic write follows a symlink instead of replacing it', () => {
     // ~/.claude.json is a symlink onto the PVC. rename(2) replaces the link,
     // so a naive atomic write leaves a container-layer file and the pulled

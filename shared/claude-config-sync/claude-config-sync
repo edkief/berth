@@ -53,7 +53,7 @@ const AUTH_KEY = process.env.AUTH_S3_KEY || 'auth/token.json';
 /** Single files copied verbatim. */
 const FILES = [
     { local: CLAUDE_JSON, remote: 'claude.json', merge: 'json' },
-    { local: path.join(CLAUDE_DIR, 'settings.json'), remote: 'settings.json' },
+    { local: path.join(CLAUDE_DIR, 'settings.json'), remote: 'settings.json', merge: 'settings' },
     { local: path.join(CLAUDE_DIR, 'CLAUDE.md'), remote: 'CLAUDE.md' },
 ];
 
@@ -268,6 +268,90 @@ function stripClaudeJson(doc) {
 /** Remote wins for the keys it carries; everything local (incl. trust map) stays. */
 function mergeClaudeJson(local, remote) {
     return { ...local, ...remote, projects: local.projects || {} };
+}
+
+// herdr's agent integration (the standalone editor's, HERDR_ENABLE) adds hook
+// handlers to settings.json that run ~/.claude/hooks/herdr-agent-state.sh. That
+// script is not in the bundle, so the entries are machine-local, like the trust
+// map in .claude.json: never published, and kept across a pull.
+const HERDR_HOOK = 'herdr-agent-state';
+
+function isHerdrHook(hook) {
+    return typeof hook?.command === 'string' && hook.command.includes(HERDR_HOOK);
+}
+
+/**
+ * Split settings.hooks into what is published and what stays here. A matcher
+ * group or event emptied *by the split* is dropped from the published side;
+ * one that was already empty is left as it was.
+ */
+function partitionHooks(doc) {
+    const kept = {};
+    const local = {};
+    for (const [event, groups] of Object.entries(doc?.hooks || {})) {
+        if (!Array.isArray(groups)) { kept[event] = groups; continue; }
+        const keptGroups = [];
+        for (const group of groups) {
+            const hooks = Array.isArray(group?.hooks) ? group.hooks : null;
+            if (!hooks || !hooks.some(isHerdrHook)) { keptGroups.push(group); continue; }
+            const others = hooks.filter((h) => !isHerdrHook(h));
+            (local[event] ||= []).push({ ...group, hooks: hooks.filter(isHerdrHook) });
+            if (others.length) keptGroups.push({ ...group, hooks: others });
+        }
+        if (keptGroups.length || !groups.length) kept[event] = keptGroups;
+    }
+    return { kept, local };
+}
+
+/** settings.json as published: herdr's hook handlers removed. */
+function stripSettings(doc) {
+    if (!doc?.hooks || typeof doc.hooks !== 'object') return doc;
+    const { kept, local } = partitionHooks(doc);
+    if (!Object.keys(local).length) return doc;
+    const out = { ...doc };
+    if (Object.keys(kept).length) out.hooks = kept; else delete out.hooks;
+    return out;
+}
+
+/** The pulled settings.json, with this machine's herdr hook handlers kept. */
+function mergeSettings(local, remote) {
+    const { local: herdr } = partitionHooks(local);
+    const out = stripSettings(remote);
+    if (!Object.keys(herdr).length) return out;
+    const hooks = { ...(out.hooks || {}) };
+    for (const [event, groups] of Object.entries(herdr)) {
+        hooks[event] = [...(Array.isArray(hooks[event]) ? hooks[event] : []), ...groups];
+    }
+    return { ...out, hooks };
+}
+
+function parseOr(text, fallback) {
+    try { return JSON.parse(text); } catch { return fallback; }
+}
+
+/**
+ * The bytes push publishes (and status compares). Untouched unless there is a
+ * herdr hook to remove, so a settings.json without one keeps its hash, and an
+ * unparseable one is shipped as it always was.
+ */
+function publishedSettingsText(text) {
+    const doc = parseOr(text, undefined);
+    if (!doc || typeof doc !== 'object') return text;
+    const stripped = stripSettings(doc);
+    return stripped === doc ? text : `${JSON.stringify(stripped, null, 2)}\n`;
+}
+
+/** The bytes pull writes: the remote's, plus this machine's herdr hooks. */
+function pulledSettingsText(localText, remoteText) {
+    const local = localText === null ? null : parseOr(localText, null);
+    const remote = parseOr(remoteText, undefined);
+    if (!local || !remote || typeof remote !== 'object') return remoteText;
+    if (!Object.keys(partitionHooks(local).local).length) return remoteText;
+    return `${JSON.stringify(mergeSettings(local, remote), null, 2)}\n`;
+}
+
+function readTextMaybe(file) {
+    try { return fs.readFileSync(file, 'utf8'); } catch { return null; }
 }
 
 function pushPolicy() { return process.env.CONFIG_PUSH_POLICY || 'any'; }
@@ -603,6 +687,8 @@ function pull({ withToken = true } = {}) {
             const local = readJson(entry.local, {});
             const incoming = JSON.parse(body);
             writeJsonAtomic(entry.local, mergeClaudeJson(local, incoming));
+        } else if (entry.merge === 'settings') {
+            writeThroughAtomic(entry.local, pulledSettingsText(readTextMaybe(entry.local), body), entry.mode);
         } else {
             writeThroughAtomic(entry.local, body, entry.mode);
         }
@@ -680,6 +766,9 @@ function push({ force = false } = {}) {
         if (entry.merge === 'json') {
             tmp = path.join(os.tmpdir(), `claude.json.${process.pid}`);
             fs.writeFileSync(tmp, JSON.stringify(stripClaudeJson(readJson(entry.local, {})), null, 2));
+        } else if (entry.merge === 'settings') {
+            tmp = path.join(os.tmpdir(), `settings.json.${process.pid}`);
+            fs.writeFileSync(tmp, publishedSettingsText(fs.readFileSync(entry.local, 'utf8')));
         } else {
             tmp = entry.local;
         }
@@ -754,6 +843,10 @@ function status() {
         if (entry.merge === 'json') {
             file = path.join(os.tmpdir(), `cmp.claude.json.${process.pid}`);
             fs.writeFileSync(file, JSON.stringify(stripClaudeJson(readJson(entry.local, {})), null, 2));
+            temp = true;
+        } else if (entry.merge === 'settings') {
+            file = path.join(os.tmpdir(), `cmp.settings.json.${process.pid}`);
+            fs.writeFileSync(file, publishedSettingsText(fs.readFileSync(entry.local, 'utf8')));
             temp = true;
         }
         const sha = sha256File(file);
@@ -862,7 +955,8 @@ function main() {
 if (require.main === module) main();
 
 module.exports = {
-    stripClaudeJson, mergeClaudeJson, isConfigured, rcloneConfigBody, isMissing,
+    stripClaudeJson, mergeClaudeJson, stripSettings, mergeSettings,
+    publishedSettingsText, pulledSettingsText, isConfigured, rcloneConfigBody, isMissing,
     isFresher, parseTokenObject, authPath, localCredentials, writeCredentials,
     tokenPull, tokenPush, tokenStatus, fetchRemoteToken, writeJsonAtomic,
     STRIP_KEYS, STRIP_PATTERNS, ADDITIVE, FILES, LEGACY_CREDENTIALS_ENTRY,
