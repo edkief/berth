@@ -54,3 +54,12 @@ test('unversioned assets are served with a revalidating cache header', () => {
         assert.match(source, sent, `${page} must revalidate`);
     }
 });
+
+test('the header links the herdr terminal through the wrapper, hidden until /api/editor says so', () => {
+    const dashboard = fs.readFileSync(path.join(__dirname, '..', 'public', 'index.html'), 'utf8');
+    assert.match(dashboard, /id="herdr-link" href="\/terminal\/editor\/"[^>]* hidden>/);
+    assert.ok(!dashboard.includes('href="/editor-tty/"'), 'link the wrapper, not the raw ttyd base path');
+    const app = fs.readFileSync(path.join(__dirname, '..', 'public', 'js', 'app.js'), 'utf8');
+    assert.match(app, /herdr\.hidden = !editor\.terminalUrl/);
+    assert.match(app, /editor\.status === 'running'/);
+});

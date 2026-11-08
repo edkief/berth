@@ -23,6 +23,7 @@ h1, h2, h3 { font-family: var(--display); font-weight: 700; }
    group -- filled running, pulsing starting, a ring down, hollow unknown. */
 .header-nav__editor { display: inline-flex; align-items: center; gap: 6px; }
 .header-nav__editor[hidden] { display: none; }
+.header-nav__editor[aria-disabled="true"] { opacity: .55; cursor: default; }
 .header-nav__editor::before { width: 6px; height: 6px; border-radius: 50%; background: transparent; box-shadow: inset 0 0 0 1px var(--muted); content: ""; }
 .header-nav__editor[data-status="running"]::before { background: var(--green); box-shadow: none; }
 .header-nav__editor[data-status="starting"]::before { background: var(--accent); box-shadow: none; animation: ralph-pulse 1.2s ease-in-out infinite; }

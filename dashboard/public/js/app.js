@@ -163,9 +163,20 @@ async function loadEditor() {
   let editor;
   try { editor = await api.editor(); } catch { editor = link.hidden ? { url: null } : { url: link.href, status: 'unknown' }; }
   link.hidden = !editor.url;
-  if (!editor.url) return;
+  if (!editor.url) { $('#herdr-link').hidden = true; return; }
   link.href = editor.url; link.dataset.status = editor.status; link.title = EDITOR_TITLES[editor.status] || '';
   link.setAttribute('aria-label', `Open editor (${(EDITOR_TITLES[editor.status] || '').toLowerCase()})`);
+  // Its herdr terminal, beside it only when the editor runs one; it shares the
+  // editor's dot, and goes inert (no href) while the editor is not running.
+  const herdr = $('#herdr-link');
+  herdr.hidden = !editor.terminalUrl;
+  if (!editor.terminalUrl) return;
+  const open = editor.status === 'running';
+  herdr.dataset.status = editor.status;
+  if (open) herdr.href = editor.terminalUrl; else herdr.removeAttribute('href');
+  herdr.setAttribute('aria-disabled', String(!open));
+  herdr.title = open ? 'herdr in the editor (mobile key drawer)' : (EDITOR_TITLES[editor.status] || '');
+  herdr.setAttribute('aria-label', `Open herdr terminal (${(EDITOR_TITLES[editor.status] || '').toLowerCase()})`);
 }
 
 function setupTabs() { const tabs = [['storage-tab','storage-panel'],['profiles-tab','profiles-panel'],['config-tab','config-panel']]; tabs.forEach(([tabId]) => $("#" + tabId).addEventListener('click', () => { for (const [otherTab, otherPanel] of tabs) { const active = otherTab === tabId; $("#" + otherTab).classList.toggle('is-active', active); $("#" + otherTab).setAttribute('aria-selected', String(active)); $("#" + otherPanel).hidden = !active; } })); }
