@@ -1,10 +1,10 @@
 import { FUNCTION_KEYS, MAIN_KEYS, keySequence } from './terminal-keys.mjs';
 
-// `config` is the shared-config shell, which ttyd serves at its own base path.
-const match = /^\/terminal\/(config|berth-ws-[a-z0-9-]+-[0-9a-f]{8})\/?$/.exec(window.location.pathname);
-const frameSrc = match && (match[1] === 'config'
-  ? '/config-tty/'
-  : `/tty/${encodeURIComponent(match[1])}/`);
+// `config` is the shared-config shell and `editor` the standalone editor's
+// herdr terminal; ttyd serves each at its own fixed base path.
+const FIXED_TERMINALS = { config: '/config-tty/', editor: '/editor-tty/' };
+const match = /^\/terminal\/(config|editor|berth-ws-[a-z0-9-]+-[0-9a-f]{8})\/?$/.exec(window.location.pathname);
+const frameSrc = match && (FIXED_TERMINALS[match[1]] || `/tty/${encodeURIComponent(match[1])}/`);
 const frame = document.getElementById('terminal-frame');
 const drawer = document.getElementById('keyboard-drawer');
 const toggle = document.getElementById('keyboard-toggle');
@@ -180,6 +180,7 @@ frame.addEventListener('load', () => {
 
 if (match) {
   if (match[1] === 'config') document.title = 'Berth config shell';
+  if (match[1] === 'editor') document.title = 'Berth herdr';
   frame.src = frameSrc;
 } else {
   frame.replaceWith(Object.assign(document.createElement('p'), { textContent: 'Invalid terminal URL.' }));

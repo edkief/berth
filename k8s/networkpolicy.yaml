@@ -34,3 +34,42 @@ spec:
           port: 7686
         - protocol: TCP
           port: 4280
+---
+# The standalone editor (k8s/editor.yaml). code-server runs --auth none and
+# the herdr terminal's ttyd has no login either, so the authz-proxy in front of
+# each is the only gate, and reaching a port directly from inside the cluster
+# (a workspace's agent, say) would skip it. So:
+#   7686 code-server  <- the ingress controller only (k3s's bundled Traefik)
+#   7681 herdr ttyd   <- the dashboard only, which proxies /editor-tty/
+#   7682 agent        <- nobody: kubelet probes come from the node, which this
+#                        cluster's CNI admits, as for the workspace policy above
+# Apply this before editor.yaml.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: berth-editor-ingress
+  namespace: dev
+spec:
+  podSelector:
+    matchLabels:
+      app: berth-editor
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: traefik
+      ports:
+        - protocol: TCP
+          port: 7686
+    - from:
+        - podSelector:
+            matchLabels:
+              app: berth-dashboard
+      ports:
+        - protocol: TCP
+          port: 7681

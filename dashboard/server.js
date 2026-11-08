@@ -206,6 +206,23 @@ app.use('/config-tty', (req, res) => {
     ttyProxy.proxyRequest(req, res, { id: '__config__', ip: '127.0.0.1', port: CONFIG_TTY_PORT });
 });
 
+// The standalone editor's herdr terminal: ttyd in the editor pod, told
+// TTY_BASE_PATH=/editor-tty by k8s/editor.yaml, so the full path passes through
+// unchanged as for /tty/<id>. A fixed target (the editor's Service), probed
+// before use so a down editor gets a page, not a hang. Off without EDITOR_URL:
+// a dashboard with no editor configured proxies to no guessed host.
+const editorTtyTarget = () => ttyProxy.resolveFixedTarget('__editor__',
+    editor.EDITOR_SERVICE, editor.EDITOR_TTY_PORT, `${editor.EDITOR_TTY_BASE}/`);
+app.use(editor.EDITOR_TTY_BASE, asyncRoute(async (req, res) => {
+    if (!cfg.editorUrl) return res.status(404).type('text').send('No standalone editor configured (EDITOR_URL).');
+    const target = await editorTtyTarget();
+    if (target.notReady) {
+        return res.status(503).type('html').send(ttyProxy.editorTerminalNotRunningPage(cfg.editorUrl));
+    }
+    req.url = req.originalUrl;
+    ttyProxy.proxyRequest(req, res, target);
+}));
+
 // Proxy routes above must receive the untouched request stream. Registering
 // express.json() before them consumes Codex RPC POST bodies, then the raw proxy
 // forwards the original Content-Length with no bytes and codexapp waits
@@ -525,9 +542,13 @@ app.get('/api/disk', asyncRoute(async (req, res) => {
 // inside a same-origin iframe. Validate the path here instead of letting the
 // dashboard SPA swallow malformed terminal URLs. `config` is the shared-config
 // shell at /config-tty/: it is a terminal too, so it gets the same chrome
-// rather than a raw ttyd with no way to type Esc or Ctrl on a phone.
+// rather than a raw ttyd with no way to type Esc or Ctrl on a phone. `editor`
+// is the standalone editor's herdr terminal at /editor-tty/, whose Ctrl+B
+// prefix is exactly what a phone keyboard lacks.
 app.get('/terminal/:id', (req, res) => {
-    if (req.params.id !== 'config' && !isWorkspaceId(req.params.id)) {
+    const { id } = req.params;
+    const known = id === 'config' || (id === 'editor' && cfg.editorUrl) || isWorkspaceId(id);
+    if (!known) {
         return res.status(404).type('html').send(ttyProxy.notFoundPage(req.params.id));
     }
     res.set('Cache-Control', 'no-cache').sendFile(path.join(__dirname, 'public', 'terminal.html'));
@@ -572,6 +593,13 @@ server.on('upgrade', async (req, socket, head) => {
             return ttyProxy.proxyUpgrade(req, socket, head, {
                 id: '__config__', ip: '127.0.0.1', port: CONFIG_TTY_PORT,
             });
+        }
+
+        if (ttyProxy.matchEditorUpgrade(req.url, editor.EDITOR_TTY_BASE)) {
+            if (!cfg.editorUrl) return socket.end('HTTP/1.1 404 Not Found\r\n\r\n');
+            const target = await editorTtyTarget();
+            if (target.notReady) return socket.end('HTTP/1.1 503 Service Unavailable\r\n\r\n');
+            return ttyProxy.proxyUpgrade(req, socket, head, target);
         }
 
         const match = ttyProxy.matchWorkspaceUpgrade(req.url);

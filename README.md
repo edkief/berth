@@ -147,7 +147,7 @@ default branch. Override with `REGISTRY=...` / `REPO_NAME=...`.
 kubectl apply -f k8s/dashboard.yaml \
                -f k8s/networkpolicy.yaml \
                -f k8s/cleanup-cronjob.yaml
-kubectl apply -f k8s/editor.yaml      # optional: the standalone editor
+kubectl apply -f k8s/editor.yaml      # optional: the standalone editor (after networkpolicy.yaml)
 ```
 
 `k8s/dashboard.yaml` also creates the cluster-scoped `berth-workspace`
@@ -217,7 +217,10 @@ error rather than an obvious misconfiguration.
   `kubectl` (`k8s/editor.yaml`), not from the dashboard. With `HERDR_ENABLE`
   (on in the manifest) it also runs a background [herdr](https://github.com/herdrdev/herdr)
   server: type `herdr` in a terminal, start agents in its panes, and they keep
-  working after the tab closes.
+  working after the tab closes. The header's **herdr** link opens that same
+  session from the dashboard, in the terminal page with the key drawer, so
+  herdr's `Ctrl+B` works from a phone. `k8s/networkpolicy.yaml` lets only the
+  ingress controller reach its VS Code and only the dashboard its terminal.
 - **Open Claude** appears once the workspace's Claude Remote session has
   actually printed a `claude.ai/code` link in its pane — the card links straight
   to that live session instead of just the terminal.

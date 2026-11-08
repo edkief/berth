@@ -34,6 +34,8 @@ if [ "$WORKSPACE_MODE" = "editor" ]; then
     export CODE_ENABLE=1
     # ttyd and codexapp are reached only through the dashboard's per-workspace
     # proxy, which the editor has none of; supervisord leaves them stopped.
+    # (Its herdr terminal is a separate ttyd, [program:herdr-tty], gated on
+    # HERDR_SERVER below.)
     export WORKSPACE_TERMINALS=false
 else
     export WORKSPACE_TERMINALS=true

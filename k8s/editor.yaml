@@ -9,8 +9,11 @@
 #
 # IaC, not dashboard-owned: it is a singleton like the dashboard, so the
 # dashboard's Role gains nothing and the editor outlives a dashboard rollout.
-# The dashboard only links to it (EDITOR_URL) with a status dot read from
-# `app=berth-editor` pods.
+# The dashboard links to it (EDITOR_URL) with a status dot read from
+# `app=berth-editor` pods, and proxies one thing through this Service: the
+# herdr terminal (ttyd on 7681, under TTY_BASE_PATH) at /terminal/editor/.
+# k8s/networkpolicy.yaml admits 7681 only from the dashboard and 7686 only
+# from the ingress controller; apply it before this.
 #
 # Labelled app=berth-editor, never berth-workspace: workspace listings,
 # MAX_WORKSPACES, metrics and the PVC pruner all select on that label, and the
@@ -88,6 +91,10 @@ spec:
               name: code-ui
             - containerPort: 7682
               name: agent
+            # ttyd running `herdr`, only with HERDR_ENABLE; the dashboard's
+            # /terminal/editor/ reaches it through the Service.
+            - containerPort: 7681
+              name: tty
           env:
             - name: WORKSPACE_MODE
               value: "editor"
@@ -109,6 +116,10 @@ spec:
             # turns it off at the next restart.
             - name: HERDR_ENABLE
               value: "1"
+            # The herdr terminal's ttyd bakes this into its JS: it must be the
+            # dashboard's route to it (EDITOR_TTY_BASE in dashboard/lib/editor.js).
+            - name: TTY_BASE_PATH
+              value: "/editor-tty"
             # Matches the dashboard's; with anything but `any`, swap the
             # envFrom below to claude-config-s3-ro as the dashboard does.
             - name: CONFIG_PUSH_POLICY
@@ -195,6 +206,11 @@ spec:
       protocol: TCP
       port: 7686
       targetPort: code-ui
+    # The herdr terminal, for the dashboard's proxy only (NetworkPolicy).
+    - name: tty
+      protocol: TCP
+      port: 7681
+      targetPort: tty
 ---
 # Its own host rather than a dashboard route: code-server is served at `/`
 # with nothing to strip, gets an origin of its own (service worker, storage),
