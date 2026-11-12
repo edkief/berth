@@ -956,7 +956,9 @@ through *each* package's own
 leaves the MCP server's pinned revision missing. The MCP config launches the
 `playwright-mcp` binary already on `PATH` rather than `npx -y
 @playwright/mcp@latest`, which would re-fetch from the registry on every start
-and could lose the race against the connect timeout during bootstrap.
+and could lose the race against the connect timeout during bootstrap. That
+binary is linked into `/usr/local/bin`: Claude Code launched from code-server
+or supervisord has no nvm on its PATH and otherwise fails to start the server.
 
 OpenCode V2 is the official `@opencode/cli` package (bins `opencode` and
 `opencode2`) — **not** the unrelated third-party `opencode2` package, and not

@@ -155,13 +155,17 @@ ENV PLAYWRIGHT_MCP_BROWSER=chromium
 # the server itself had started fine. --with-deps once (as root) covers the OS
 # packages for all three; the other installs only fetch their browser.
 # playwright-cli is linked for the same reason as ralph below: the Ralph daemon
-# runs under supervisord, with no nvm on its PATH.
+# runs under supervisord, with no nvm on its PATH. playwright-mcp likewise: the
+# shared ~/.claude.json launches it by bare name, and Claude Code started from
+# code-server or supervisord inherits that nvm-less PATH, so without the link
+# the MCP server fails with "Executable not found in $PATH: playwright-mcp".
 RUN . "$NVM_DIR/nvm.sh" \
     && apt-get update \
     && playwright install --with-deps chromium \
     && node "$(npm root -g)/@playwright/mcp/node_modules/playwright-core/cli.js" install chromium \
     && node "$(npm root -g)/@playwright/cli/node_modules/playwright-core/cli.js" install chromium \
     && ln -sf "$(which playwright-cli)" /usr/local/bin/playwright-cli \
+    && ln -sf "$(which playwright-mcp)" /usr/local/bin/playwright-mcp \
     && rm -rf /var/lib/apt/lists/*
 
 USER ubuntu
