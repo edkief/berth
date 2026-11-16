@@ -11,6 +11,10 @@ ENV RUSTUP_HOME=/home/ubuntu/.rustup
 ENV CARGO_HOME=/home/ubuntu/.cargo
 ENV PATH="/home/ubuntu/.cargo/bin:${PATH}"
 
+# openssh-server (and rsync, for rsync over it) is for the standalone editor's
+# opt-in sshd (SSH_ENABLE, see bootstrap/sshd.sh). Its postinst generates host
+# keys that every container of this image would share, so they are deleted in
+# this same layer; the editor generates its own on its PVC.
 RUN apt-get update && apt-get install -y \
     curl htop \
     git \
@@ -23,11 +27,14 @@ RUN apt-get update && apt-get install -y \
     byobu \
     supervisor \
     openssh-client \
+    openssh-server \
+    rsync \
     unzip \
     python3 python3-venv \
     openjdk-21-jdk  \
     postgresql postgresql-contrib \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && rm -f /etc/ssh/ssh_host_*
 
 RUN curl -Lo /tmp/gradle.zip https://services.gradle.org/distributions/gradle-8.14.5-bin.zip \
     && mkdir -p /opt/gradle \

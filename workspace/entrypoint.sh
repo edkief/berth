@@ -49,6 +49,24 @@ if [ "$WORKSPACE_MODE" = "editor" ]; then
         1|true|yes|on) export HERDR_SERVER=true ;;
     esac
 fi
+# SSH into the editor, landing in herdr: editor mode only, like herdr, and
+# only with keys to let anyone in. SSH_SERVER is supervisord's autostart for
+# [program:sshd]. A missing keys file (the Secret is optional) leaves it off
+# with a warning: deciding here, not in sshd.sh, is what keeps supervisord
+# from retrying a start that cannot succeed.
+export SSH_AUTHORIZED_KEYS="${SSH_AUTHORIZED_KEYS:-/run/secrets/ssh-authorized-keys/authorized_keys}"
+export SSH_SERVER=false
+if [ "$WORKSPACE_MODE" = "editor" ]; then
+    case "${SSH_ENABLE:-}" in
+        1|true|yes|on)
+            if [ -s "$SSH_AUTHORIZED_KEYS" ]; then
+                export SSH_SERVER=true
+            else
+                echo "[entrypoint] WARN: SSH_ENABLE is set but $SSH_AUTHORIZED_KEYS is missing or empty; sshd stays off" >&2
+            fi
+            ;;
+    esac
+fi
 
 fail() {
     echo "$1" > "$STATE_DIR/error"
