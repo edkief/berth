@@ -221,6 +221,10 @@ error rather than an obvious misconfiguration.
   session from the dashboard, in the terminal page with the key drawer, so
   herdr's `Ctrl+B` works from a phone. `k8s/networkpolicy.yaml` lets only the
   ingress controller reach its VS Code and only the dashboard its terminal.
+  With `SSH_ENABLE=1` and an `authorized_keys` Secret mounted, the editor also
+  runs an sshd (port 2222, keys only) whose logins land in that herdr session,
+  for a native phone client such as Termius or Blink; `scp`/`rsync`/sftp work
+  too. Exposing the port is up to your cluster manifests.
 - **Open Claude** appears once the workspace's Claude Remote session has
   actually printed a `claude.ai/code` link in its pane — the card links straight
   to that live session instead of just the terminal.
