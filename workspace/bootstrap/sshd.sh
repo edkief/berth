@@ -16,7 +16,10 @@
 #      host after a restart or a reschedule. Their mode is reset each time:
 #      fsGroup can widen it, and sshd refuses a group-readable key.
 #   3. The pod env a login needs is written to a file the session sources:
-#      sshd builds a session's environment from scratch.
+#      sshd builds a session's environment from scratch. That includes what
+#      herdr-core resolves its socket from (HC_*, XDG_*, when the pod sets
+#      them), so `herdr-core connect` from the herdr app reaches the
+#      supervised core instead of spawning a second one.
 #   4. The config is written and sshd is exec'd in the foreground.
 #
 # SSH_DRY_RUN=1 stops before the exec and prints the config (tests).
@@ -64,7 +67,8 @@ done
 # 3. session env (printf %q keeps any value safe to source)
 {
     for var in WORKSPACE_DIR CODEX_HOME PI_CODING_AGENT_DIR GITHUB_TOKEN GH_TOKEN \
-               HERDR_SERVER NVM_DIR TZ; do
+               HERDR_SERVER HERDR_CORE_SERVER HC_SOCKET HC_SESSION \
+               XDG_RUNTIME_DIR XDG_STATE_HOME XDG_CONFIG_HOME NVM_DIR TZ; do
         if [ -n "${!var:-}" ]; then
             printf 'export %s=%q\n' "$var" "${!var}"
         fi

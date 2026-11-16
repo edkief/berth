@@ -86,6 +86,7 @@ which is the reason this design replaced the previous single-pod one.
 | `workspace/bootstrap/code-server.sh` + `server.js` `/code/:id` | Opt-in browser VS Code: its launcher (a no-op without `CODE_ENABLE`), and its prefix-stripping proxy (`codeUpstreamPath()` in `ttyProxy.js`) |
 | `k8s/editor.yaml` + `entrypoint.sh` `WORKSPACE_MODE=editor` | The standalone editor: Deployment, PVC, Service, Ingress, and the bootstrap/agent mode it runs in (`editorHealth()` in `agent.js`) |
 | `supervisord.conf` `[program:herdr]` + `entrypoint.sh` `HERDR_SERVER` | The editor's opt-in background herdr server, its PVC state and agent integrations |
+| `supervisord.conf` `[program:herdr-core]` + `entrypoint.sh` `HERDR_CORE_SERVER` | The editor's opt-in herdr-core (`hc`), what the herdr app attaches to over SSH |
 | `workspace/bootstrap/sshd.sh` + `ssh-session.sh` + `entrypoint.sh` `SSH_SERVER` | The editor's opt-in non-root sshd, and the forced command that lands a login in herdr |
 | `dashboard/lib/editor.js` | `editorStatus()` — the header's Editor dot from `app=berth-editor` pods; `editorTerminal()` — whether they run the herdr terminal; the `/editor-tty` route constants |
 | `dashboard/public/js/ralph-state.mjs` | `ralphView()` — the Ralph button's state, dot and action; pure, unit-tested |
@@ -572,6 +573,44 @@ device's client, with no browser in the path.
   as the LoadBalancer allows.
 - **Never readiness or liveness**, like herdr.
 
+### herdr-core (editor only, `HERDR_CORE_ENABLE`)
+
+The herdr Android app does not run `herdr` over SSH. It runs
+[herdr-core](https://github.com/herdrdev/herdr-core) (`hc`), a separate
+terminal runtime: `sh -c '… command -v herdr-core … exec "$p" connect'`, which
+speaks its protocol over the session's stdin/stdout. So the editor can run one,
+supervised, for the app, and `hc ls` / `hc attach` in any shell (a herdr pane
+included) see the same terminals as the phone. herdr itself is untouched: its
+panes do not run through `hc`.
+
+- **Editor mode only, behind its own flag.** `entrypoint.sh` sets
+  `HERDR_CORE_SERVER=true` only with `WORKSPACE_MODE=editor` and
+  `HERDR_CORE_ENABLE`, independent of `HERDR_ENABLE` (the app needs the core,
+  not herdr). Off in this repo's `k8s/editor.yaml`, like SSH; the cluster's
+  manifests turn both on.
+- **Pinned by version and sha256** (`HERDR_CORE_VERSION`,
+  `HERDR_CORE_SHA256`), at `/usr/local/bin/herdr-core` with `hc` linked
+  beside it. There is no GitHub release: `releases.herdr.dev/core/<v>/manifest.json`
+  lists each target's tarball and checksum. Bump both together. The image is
+  x86_64 only. `hc update` cannot replace a root-owned binary, which fits the
+  pin.
+- **A supervised `herdr-core serve`, not one a client spawns.** Without
+  systemd, an auto-spawned core "ends with whatever started it"; supervisord's
+  outlives every client. `[program:herdr-core]` follows herdr's rules:
+  `autorestart=unexpected` + `exitcodes=0`, so `hc server stop` stays down and
+  a crash restarts; a core already holding the lock (one a client spawned
+  first) makes it fail and end `FATAL`. `SHELL` is set for its terminals.
+- **State on the PVC**, linked by `persist_home` only when enabled:
+  `~/.local/state/herdr-core` (its terminal records) → `_home/herdr-core/state`,
+  `~/.config/herdr-core` (`config.toml`, templates) → `_home/herdr-core/config`.
+- **One socket for everyone.** The core resolves its socket from `HOME` and
+  `XDG_RUNTIME_DIR` / `XDG_STATE_HOME` / `HC_SOCKET` / `HC_SESSION`, and a
+  client that resolves another path spawns a second core. The pod sets none,
+  and a non-PAM sshd adds none; `sshd.sh` still copies any that are set into
+  `berth-env`, so a manifest that pins `HC_SOCKET` keeps SSH sessions and the
+  supervised core (which inherits the pod env) agreeing.
+- **Never readiness or liveness**, like herdr.
+
 ## Files (filebrowser sidecar)
 
 Every workspace pod also runs [filebrowser](https://github.com/filebrowser/filebrowser)
@@ -624,6 +663,7 @@ branch checkout and `_home/`), proxied at `/files/<id>/` and linked as
   _home/opencode/{data,config,state}/ ← ~/.local/share|.config|.local/state/opencode symlink here
   _home/pi/                 ← PI_CODING_AGENT_DIR (~/.pi/agent symlinks here)
   _home/herdr/{config,state,home}/ ← editor only, with HERDR_ENABLE
+  _home/herdr-core/{state,config}/ ← editor only, with HERDR_CORE_ENABLE
   _home/ssh/                ← editor only, with SSH_ENABLE: sshd host keys
   main/                     ← checkout
   feature-x/                ← checkout

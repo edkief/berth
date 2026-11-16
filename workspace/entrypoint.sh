@@ -49,6 +49,17 @@ if [ "$WORKSPACE_MODE" = "editor" ]; then
         1|true|yes|on) export HERDR_SERVER=true ;;
     esac
 fi
+# herdr-core (`hc`), the terminal runtime the herdr app attaches to over SSH
+# (`herdr-core connect`): editor mode only, and independent of HERDR_ENABLE --
+# the app needs the core, not herdr. HERDR_CORE_SERVER is supervisord's
+# autostart for [program:herdr-core]. Supervised, not auto-spawned by the
+# first client: without systemd, a spawned core ends with whatever started it.
+export HERDR_CORE_SERVER=false
+if [ "$WORKSPACE_MODE" = "editor" ]; then
+    case "${HERDR_CORE_ENABLE:-}" in
+        1|true|yes|on) export HERDR_CORE_SERVER=true ;;
+    esac
+fi
 # SSH into the editor, landing in herdr: editor mode only, like herdr, and
 # only with keys to let anyone in. SSH_SERVER is supervisord's autostart for
 # [program:sshd]. A missing keys file (the Secret is optional) leaves it off
@@ -162,6 +173,13 @@ if [ "$HERDR_SERVER" = "true" ]; then
     if [ ! -e /workspace/_home/herdr/config/config.toml ]; then
         echo 'onboarding = false' > /workspace/_home/herdr/config/config.toml
     fi
+fi
+# herdr-core keeps its record of terminals (and what to restore) in its state
+# dir, and config.toml and templates in its config dir. Its socket and lock
+# resolve from the same paths, so every client agrees with the supervised core.
+if [ "$HERDR_CORE_SERVER" = "true" ]; then
+    persist_home .local/state/herdr-core /workspace/_home/herdr-core/state
+    persist_home .config/herdr-core      /workspace/_home/herdr-core/config
 fi
 if [ ! -e "$CLAUDE_CONFIG_TARGET" ]; then
     if [ -f "$CLAUDE_CONFIG_FILE" ] && [ ! -L "$CLAUDE_CONFIG_FILE" ]; then

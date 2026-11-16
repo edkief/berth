@@ -145,6 +145,19 @@ test('the session env is written safely quoted, and a bad port falls back', { sk
     assert.equal(out, "x y'z|true|/workspace");
 });
 
+test('the session env carries what herdr-core resolves its socket from, only when set', { skip: !hasKeygen && 'no ssh-keygen' }, (t) => {
+    const { status, stderr, env } = dryRun(t, {
+        HERDR_CORE_SERVER: 'true', HC_SOCKET: '/run/hc/core.sock', XDG_STATE_HOME: '/home/ubuntu/.local/state',
+    });
+    assert.equal(status, 0, stderr);
+    const text = fs.readFileSync(path.join(env.SSH_STATE_DIR, 'berth-env'), 'utf8');
+    assert.match(text, /^export HERDR_CORE_SERVER=true$/m);
+    assert.match(text, /^export HC_SOCKET=\/run\/hc\/core\.sock$/m);
+    assert.match(text, /^export XDG_STATE_HOME=/m);
+    // Unset stays unset: an empty XDG_RUNTIME_DIR would move the socket.
+    assert.doesNotMatch(text, /HC_SESSION|XDG_RUNTIME_DIR|XDG_CONFIG_HOME/);
+});
+
 test('sshd.sh refuses to start without keys', (t) => {
     const dir = tmp();
     const r = spawnSync('/bin/bash', [SSHD], {
