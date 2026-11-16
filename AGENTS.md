@@ -86,6 +86,7 @@ which is the reason this design replaced the previous single-pod one.
 | `workspace/bootstrap/code-server.sh` + `server.js` `/code/:id` | Opt-in browser VS Code: its launcher (a no-op without `CODE_ENABLE`), and its prefix-stripping proxy (`codeUpstreamPath()` in `ttyProxy.js`) |
 | `k8s/editor.yaml` + `entrypoint.sh` `WORKSPACE_MODE=editor` | The standalone editor: Deployment, PVC, Service, Ingress, and the bootstrap/agent mode it runs in (`editorHealth()` in `agent.js`) |
 | `supervisord.conf` `[program:herdr]` + `entrypoint.sh` `HERDR_SERVER` | The editor's opt-in background herdr server, its PVC state and agent integrations |
+| `workspace/bootstrap/sshd.sh` + `ssh-session.sh` + `entrypoint.sh` `SSH_SERVER` | The editor's opt-in non-root sshd, and the forced command that lands a login in herdr |
 | `dashboard/lib/editor.js` | `editorStatus()` — the header's Editor dot from `app=berth-editor` pods; `editorTerminal()` — whether they run the herdr terminal; the `/editor-tty` route constants |
 | `dashboard/public/js/ralph-state.mjs` | `ralphView()` — the Ralph button's state, dot and action; pure, unit-tested |
 | `dashboard/prune-pvcs.js` | PVC pruner, run by a CronJob |
@@ -524,6 +525,53 @@ restart. `herdr` in any terminal attaches.
     (`editorTerminal()`, read from the pod like `codeAvailable()`). It shares
     the Editor dot and has no href unless the editor is running.
 
+### SSH (editor only, `SSH_ENABLE`)
+
+A native client on a phone (Termius, Blink) is a better terminal than any
+browser page, so the editor can also be reached over SSH, landing in the same
+herdr session as `/terminal/editor/`. Off unless the pod sets
+`SSH_ENABLE=1`; this repo's `k8s/editor.yaml` does not. The cluster's own
+manifests expose it (LAN only, a LoadBalancer Service) and mount the keys.
+#20 rejected SSH as the *dashboard's* way into herdr. This is different: a
+device's client, with no browser in the path.
+
+- **Editor mode only, and only with keys.** `entrypoint.sh` sets
+  `SSH_SERVER=true` (supervisord's autostart for `[program:sshd]`) only with
+  `WORKSPACE_MODE=editor`, `SSH_ENABLE`, and a non-empty
+  `SSH_AUTHORIZED_KEYS` (default
+  `/run/secrets/ssh-authorized-keys/authorized_keys`). That Secret is
+  optional: without it, a warning and no sshd. Deciding in the entrypoint,
+  not the launcher, keeps supervisord from retrying a start that cannot succeed.
+- **Non-root, as `ubuntu`, on `SSH_PORT` (2222).** sshd needs root only to
+  switch users and chroot its privsep child; one that runs as `ubuntu` can only
+  log in as `ubuntu`. `bootstrap/sshd.sh` writes its own config (never the
+  distro's) on every start: `UsePAM no`, public keys only, `AllowUsers`,
+  local TCP forwards only (a key holder already has a shell), client-alive
+  probes so a dropped phone link is reaped, and `StrictModes` **left on**.
+- **Keys are copied, not read in place.** A Secret volume's file is a symlink
+  into a root-owned `..data` dir, and `fsGroup` can leave dirs group-writable;
+  StrictModes refuses both. Each start copies it into `~/.ssh/authorized_keys`
+  (600, container layer), so `supervisorctl restart sshd` picks up a rotated
+  Secret.
+- **Host keys on the PVC**, `_home/ssh/` (ed25519 + RSA), generated once so a
+  client sees the same host after a restart or a reschedule. Their mode is reset
+  to 600 on each start: sshd refuses a group-readable key, and fsGroup can
+  widen it. The image deletes the host keys `openssh-server`'s postinst makes,
+  in the same layer, so no key is shared by every container of the image.
+- **Every login runs `ssh-session.sh`** (`ForceCommand`). With no command it
+  attaches `herdr` (a login shell without a herdr server), with `TERM`
+  defaulted to `xterm-256color` and a UTF-8 `LANG`. With one, it runs it:
+  `ssh editor ls`, `scp`, `rsync` (in the image for this) and sftp, whose
+  subsystem path arrives as `SSH_ORIGINAL_COMMAND`. `ssh -t editor bash` is
+  the plain-shell escape hatch. No command and no TTY gets a hint, not a hung
+  herdr. sshd hands a session a near-empty environment, so `sshd.sh` writes the
+  pod's (`CODEX_HOME`, `GITHUB_TOKEN`, `WORKSPACE_DIR`, …) to
+  `~/.ssh/berth-env` (600), which the session sources.
+- **The port has no authz-proxy in front.** Key possession is the only gate.
+  Expose it only where you mean to, and keep its NetworkPolicy rule as narrow
+  as the LoadBalancer allows.
+- **Never readiness or liveness**, like herdr.
+
 ## Files (filebrowser sidecar)
 
 Every workspace pod also runs [filebrowser](https://github.com/filebrowser/filebrowser)
@@ -576,6 +624,7 @@ branch checkout and `_home/`), proxied at `/files/<id>/` and linked as
   _home/opencode/{data,config,state}/ ← ~/.local/share|.config|.local/state/opencode symlink here
   _home/pi/                 ← PI_CODING_AGENT_DIR (~/.pi/agent symlinks here)
   _home/herdr/{config,state,home}/ ← editor only, with HERDR_ENABLE
+  _home/ssh/                ← editor only, with SSH_ENABLE: sshd host keys
   main/                     ← checkout
   feature-x/                ← checkout
 ```
