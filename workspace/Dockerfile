@@ -72,6 +72,21 @@ RUN curl -fsSL -o /usr/local/bin/herdr \
         "https://github.com/herdrdev/herdr/releases/download/v${HERDR_VERSION}/herdr-linux-x86_64" \
     && chmod +x /usr/local/bin/herdr
 
+# herdr-core (`hc`), the editor's only, behind HERDR_CORE_ENABLE: the terminal
+# runtime the herdr app reaches over SSH (`herdr-core connect`). Not a GitHub
+# release: releases.herdr.dev serves a per-target tarball whose sha256 is in
+# /core/<version>/manifest.json, checked here. Pinned: bump both together.
+# `hc` is the name its docs and app use.
+ARG HERDR_CORE_VERSION=0.1.21
+ARG HERDR_CORE_SHA256=78424755c10a40dde38a0bdb55c20ac19706e9ae05ed68fc2acf1fcff0d941c1
+RUN curl -fsSL -o /tmp/herdr-core.tar.gz \
+        "https://releases.herdr.dev/core/${HERDR_CORE_VERSION}/herdr-core-linux-x86_64.tar.gz" \
+    && echo "${HERDR_CORE_SHA256}  /tmp/herdr-core.tar.gz" | sha256sum -c - \
+    && tar -xzf /tmp/herdr-core.tar.gz --no-same-owner -C /usr/local/bin herdr-core \
+    && chmod 755 /usr/local/bin/herdr-core \
+    && ln -sf herdr-core /usr/local/bin/hc \
+    && rm /tmp/herdr-core.tar.gz
+
 RUN echo "ubuntu ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
 USER ubuntu
