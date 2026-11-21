@@ -44,7 +44,8 @@ test('the editor bootstrap skips the clone and the bootstrap claude remote', () 
     // Both sit inside a branch that the editor mode does not take.
     const guardBefore = (at) => source.lastIndexOf('if [ "$WORKSPACE_MODE"', at);
     assert.match(source.slice(guardBefore(clone), clone), /= "editor" \]; then[\s\S]*else/);
-    assert.match(source.slice(guardBefore(launch), launch), /!= "editor" \]; then/);
+    // Only workspace mode launches it: neither the editor nor an agent pod.
+    assert.match(source.slice(guardBefore(launch), launch), /= "workspace" \]; then/);
     assert.match(source, /export CODE_ENABLE=1/);
 });
 

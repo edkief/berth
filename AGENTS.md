@@ -88,6 +88,7 @@ which is the reason this design replaced the previous single-pod one.
 | `supervisord.conf` `[program:herdr]` + `entrypoint.sh` `HERDR_SERVER` | The editor's opt-in background herdr server, its PVC state and agent integrations |
 | `supervisord.conf` `[program:herdr-core]` + `entrypoint.sh` `HERDR_CORE_SERVER` | The editor's opt-in herdr-core (`hc`), what the herdr app attaches to over SSH |
 | `workspace/bootstrap/sshd.sh` + `ssh-session.sh` + `entrypoint.sh` `SSH_SERVER` | The editor's opt-in non-root sshd, and the forced command that lands a login in herdr |
+| `supervisord.conf` `[program:agent-runner]` + `bootstrap/agent-runner.sh` + `entrypoint.sh` `WORKSPACE_MODE=agent` | Agent mode: a caller-supplied runner in place of `claude remote`, and its readiness/liveness (`runnerHealth()`, `runnerLive()` in `agent.js`) |
 | `dashboard/lib/editor.js` | `editorStatus()` — the header's Editor dot from `app=berth-editor` pods; `editorTerminal()` — whether they run the herdr terminal; the `/editor-tty` route constants |
 | `dashboard/public/js/ralph-state.mjs` | `ralphView()` — the Ralph button's state, dot and action; pure, unit-tested |
 | `dashboard/prune-pvcs.js` | PVC pruner, run by a CronJob |
@@ -168,6 +169,9 @@ The ladder, after `$WORKSPACE_STATE_DIR/ready` exists:
 a claude that has *never* started stays 503 for a human rather than looping the
 bootstrap. `WORKSPACE_SELF_HEAL=0` disables steps 2 and 3.
 
+All of this is workspace mode. The editor and an agent pod judge health by
+another process (code-server, the runner), see their sections.
+
 ### Terminal failures: never a permanent spinner
 
 A pod whose claude cannot start is Running, its container is happy, and
@@ -178,7 +182,7 @@ to status `failed`:
 
 | stage | detected by | UI |
 |---|---|---|
-| `auth-failed` | a known auth line in the pane, or (after 30 s, and never with `ANTHROPIC_API_KEY` set) missing / expired-without-refresh `~/.claude/.credentials.json` | *Claude login required (open the terminal and run /login)* + the reason |
+| `auth-failed` | a known auth line in the pane, or (after 30 s, and never with `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` set) missing / expired-without-refresh `~/.claude/.credentials.json` | *Claude login required (open the terminal and run /login)* + the reason |
 | `launch-failed` | claude absent for `WORKSPACE_LAUNCH_TIMEOUT_MS` (default 180 s) with nothing in the pane explaining why | *Claude failed to start* + the pane tail |
 
 Two rules keep this honest:
@@ -611,6 +615,48 @@ panes do not run through `hc`.
   supervised core (which inherits the pod env) agreeing.
 - **Never readiness or liveness**, like herdr.
 
+## Agent mode (`WORKSPACE_MODE=agent`)
+
+A third mode of the workspace image, for a pod that **another system** creates
+to host headless Claude sessions (Agent SDK) that it drives from its own UI —
+ProctorSafe runs one per user. The dashboard never creates one, and nothing
+here proxies into it: the caller talks to its runner.
+
+- **A workspace's bootstrap, minus the session.** Clone, config pull, seed and
+  Postgres run exactly as in `workspace` mode; the bootstrap `claude remote`
+  does not, and `WORKSPACE_TERMINALS=false` leaves ttyd and codexapp stopped.
+- **The caller supplies the runner.** `AGENT_RUNNER_CMD` (a shell command,
+  typically one an init container dropped into a shared volume) is run by
+  `[program:agent-runner]` through `bootstrap/agent-runner.sh`, which loads nvm
+  (supervisord's PATH has none) and execs it with bash in the checkout. A
+  script, not an inline `command=`: an arbitrary command interpolated through
+  `%(ENV_*)s` breaks on its own quoting. `AGENT_RUNNER` is its autostart,
+  exported `false` in every other mode. `autorestart=true`: a headless service
+  has nobody to stop it on purpose, so any exit restarts; three starts that die
+  inside `startsecs` end `FATAL` instead of looping. Its output is the
+  container log.
+- **Missing config fails visibly.** Without `AGENT_RUNNER_CMD` or
+  `AGENT_RUNNER_HEALTH_URL` the bootstrap goes to `failed` naming the variable,
+  not to a permanent *starting*.
+- **Readiness is the runner's health URL** answering 2xx
+  (`AGENT_RUNNER_HEALTH_URL`, normally loopback), probed on a timer
+  (`AGENT_RUNNER_PROBE_MS`, 3 s) off the request path, like the editor's
+  code-server (`probeHttp()`). Before the first ready the stage is
+  `starting-runner`, after it `runner-down`.
+- **Liveness restarts only a runner that stays down.** `/livez` fails once a
+  runner that was ready has been down for `AGENT_RUNNER_DOWN_MS` (2 min): long
+  enough for supervisord's own restart of a crash to land first, so only a
+  `FATAL` or wedged runner costs a container restart. Never before the first
+  ready, and not at all with `WORKSPACE_SELF_HEAL=0`.
+- **No shared login.** The pod brings its own credential,
+  `CLAUDE_CODE_OAUTH_TOKEN` (which, like `ANTHROPIC_API_KEY`, stops a missing
+  credentials file reading as `auth-failed`). `WORKSPACE_TOKEN_SYNC` defaults
+  to 0 here, and with it 0 the boot pull is `claude-config-sync pull
+  --no-token`: refresh tokens rotate, so a pod holding the shared login that
+  renews it without publishing would leave every other holder a dead copy.
+  Settings, skills and plugins still pull, read-only S3 keys included. An
+  explicit `WORKSPACE_TOKEN_SYNC=1` restores both.
+
 ## Files (filebrowser sidecar)
 
 Every workspace pod also runs [filebrowser](https://github.com/filebrowser/filebrowser)
@@ -876,6 +922,9 @@ Two things follow that are easy to get wrong:
 The verdict never contains the token itself, only `hasRefreshToken`. Live
 workspaces are covered separately by the agent's `auth-failed` stage, and by its
 `/auth` endpoint.
+
+Agent-mode pods (see *Agent mode*) stay out of this exchange by default: they
+neither pull the shared login nor sync it.
 
 ### `CONFIG_PUSH_POLICY`
 

@@ -126,7 +126,7 @@ test('workspace/.env.example documents every var k8s/editor.yaml sets', () => {
 test('.env.example files carry no real secrets', () => {
     for (const f of ['dashboard/.env.example', 'workspace/.env.example']) {
         const documented = parseEnvFile(path.join(ROOT, f));
-        for (const key of ['S3_SECRET_ACCESS_KEY', 'S3_ACCESS_KEY_ID', 'GITHUB_TOKEN']) {
+        for (const key of ['S3_SECRET_ACCESS_KEY', 'S3_ACCESS_KEY_ID', 'GITHUB_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN']) {
             const value = documented.get(key);
             if (value === undefined) continue;
             assert.equal(value, '', `${f}: ${key} must be left empty`);

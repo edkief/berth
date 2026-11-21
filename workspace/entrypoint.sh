@@ -29,7 +29,13 @@ export HOME="${HOME:-/home/ubuntu}"
 # `editor` is the standalone VS Code Deployment (k8s/editor.yaml): same image,
 # no repo of its own and no bootstrap `claude remote` -- code-server on the
 # whole volume is the point, and the agent judges readiness by it instead.
+# `agent` is a pod another system creates to host headless Claude sessions
+# (Agent SDK) it drives itself: the clone and the config pull as in a
+# workspace, but instead of `claude remote` supervisord runs the caller's
+# AGENT_RUNNER_CMD, and readiness is AGENT_RUNNER_HEALTH_URL answering.
 export WORKSPACE_MODE="${WORKSPACE_MODE:-workspace}"
+# AGENT_RUNNER is supervisord's autostart for [program:agent-runner].
+export AGENT_RUNNER=false
 if [ "$WORKSPACE_MODE" = "editor" ]; then
     export CODE_ENABLE=1
     # ttyd and codexapp are reached only through the dashboard's per-workspace
@@ -37,6 +43,17 @@ if [ "$WORKSPACE_MODE" = "editor" ]; then
     # (Its herdr terminal is a separate ttyd, [program:herdr-tty], gated on
     # HERDR_SERVER below.)
     export WORKSPACE_TERMINALS=false
+elif [ "$WORKSPACE_MODE" = "agent" ]; then
+    # Nothing proxies an agent pod's terminals either: its caller talks to
+    # the runner.
+    export WORKSPACE_TERMINALS=false
+    export AGENT_RUNNER=true
+    # The shared login is the dashboard's workspaces', and refresh tokens
+    # rotate: a pod that renews it must publish the renewal, or every other
+    # holder is left with a dead one. An agent pod brings its own credential
+    # (CLAUDE_CODE_OAUTH_TOKEN), so by default it neither syncs the shared
+    # one nor, below, pulls it at all. An explicit 1 opts back in.
+    export WORKSPACE_TOKEN_SYNC="${WORKSPACE_TOKEN_SYNC:-0}"
 else
     export WORKSPACE_TERMINALS=true
 fi
@@ -89,6 +106,13 @@ fail() {
 }
 
 stage starting-bootstrap
+
+# An agent pod with nothing to run, or no way to tell it is up, would sit at
+# "starting" forever; say which variable is missing instead.
+if [ "$WORKSPACE_MODE" = "agent" ]; then
+    [ -n "${AGENT_RUNNER_CMD:-}" ] || fail "WORKSPACE_MODE=agent needs AGENT_RUNNER_CMD"
+    [ -n "${AGENT_RUNNER_HEALTH_URL:-}" ] || fail "WORKSPACE_MODE=agent needs AGENT_RUNNER_HEALTH_URL"
+fi
 
 # ------------------------------------------------------------------ ssh keys
 SSH_SECRET_DIR="/run/secrets/github-ssh"
@@ -198,8 +222,15 @@ fi
 # config. Pull the shared, curated config (auth, settings, skills, plugins)
 # before anything tries to run claude.
 stage syncing-config
+# Without token sync, the shared login is not pulled either: a pod that holds
+# it and renews it without publishing kills everyone else's copy (see the mode
+# block). Settings, skills and plugins still come down, read-only keys or not.
+PULL_ARGS=()
+if [ "$WORKSPACE_MODE" = "agent" ] && [ "$WORKSPACE_TOKEN_SYNC" = "0" ]; then
+    PULL_ARGS+=(--no-token)
+fi
 if [ -n "${S3_ENDPOINT:-}" ]; then
-    claude-config-sync pull || echo "[entrypoint] WARN: config pull failed, continuing"
+    claude-config-sync pull "${PULL_ARGS[@]}" || echo "[entrypoint] WARN: config pull failed, continuing"
 else
     echo "[entrypoint] S3_ENDPOINT unset; skipping config sync"
 fi
@@ -222,8 +253,10 @@ fi
 
 # The pull is the only thing that can supply credentials, so an empty config
 # here means claude will start at a login prompt. Say so in the log rather than
-# leaving it to be discovered inside the terminal.
-if [ ! -s /home/ubuntu/.claude/.credentials.json ]; then
+# leaving it to be discovered inside the terminal. A credential in the
+# environment (API key, or a `claude setup-token` token) needs no file.
+if [ -z "${ANTHROPIC_API_KEY:-}${CLAUDE_CODE_OAUTH_TOKEN:-}" ] \
+    && [ ! -s /home/ubuntu/.claude/.credentials.json ]; then
     echo "[entrypoint] WARN: no ~/.claude/.credentials.json after sync; claude will not be logged in"
 fi
 
@@ -328,8 +361,9 @@ fi
 # Created here rather than by the API (as the old single-pod design did), so the
 # session exists whether or not a browser is attached. ttyd then attaches to it.
 # The editor has none: claude there is whatever the user runs in its terminal.
+# Nor has an agent pod: its runner, under supervisord, is the session host.
 stage starting
-if [ "$WORKSPACE_MODE" != "editor" ]; then
+if [ "$WORKSPACE_MODE" = "workspace" ]; then
     SESSION_NAME="${CLAUDE_SESSION_NAME:-workspace}"
     byobu new-session -d -s claude -c "$WORKSPACE_DIR" 2>/dev/null \
         || echo "[entrypoint] WARN: byobu session already exists"
