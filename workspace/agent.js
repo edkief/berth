@@ -266,9 +266,19 @@ function paneAuthFailure(pane) {
  * A pane message is conclusive immediately. The credentials file is only
  * circumstantial -- claude may simply not have started yet, and an
  * ANTHROPIC_API_KEY setup has no OAuth file at all -- so those verdicts wait
- * out a grace period and stand down entirely when an API key is present.
+ * out a grace period and stand down entirely when the environment carries a
+ * credential (see envAuthenticated()).
  */
 const CRED_GRACE_MS = 30000;
+
+/**
+ * Credentials claude takes from the environment, ahead of the OAuth file: an
+ * API key, or a long-lived token from `claude setup-token`. Either one makes
+ * a missing or expired credentials file irrelevant.
+ */
+function envAuthenticated(env = process.env) {
+    return Boolean(env.ANTHROPIC_API_KEY || env.CLAUDE_CODE_OAUTH_TOKEN);
+}
 
 /**
  * Keep this pod's copy of the shared login in step with S3.
@@ -326,7 +336,7 @@ function authFailure(absentForMs = Infinity, pane = capturePane()) {
     if (hit) {
         return { reason: hit, detail: tail(pane) };
     }
-    if (absentForMs < CRED_GRACE_MS || process.env.ANTHROPIC_API_KEY) return null;
+    if (absentForMs < CRED_GRACE_MS || envAuthenticated()) return null;
 
     const creds = credentials();
     if (!creds.present) {
@@ -808,4 +818,4 @@ if (require.main === module) {
     }
 }
 
-module.exports = { extractClaudeUrl, ralphFromStatus, parseSupervisorStatus, editorHealth, startServer };
+module.exports = { extractClaudeUrl, envAuthenticated, ralphFromStatus, parseSupervisorStatus, editorHealth, startServer };

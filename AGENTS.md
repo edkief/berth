@@ -178,7 +178,7 @@ to status `failed`:
 
 | stage | detected by | UI |
 |---|---|---|
-| `auth-failed` | a known auth line in the pane, or (after 30 s, and never with `ANTHROPIC_API_KEY` set) missing / expired-without-refresh `~/.claude/.credentials.json` | *Claude login required (open the terminal and run /login)* + the reason |
+| `auth-failed` | a known auth line in the pane, or (after 30 s, and never with `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` set) missing / expired-without-refresh `~/.claude/.credentials.json` | *Claude login required (open the terminal and run /login)* + the reason |
 | `launch-failed` | claude absent for `WORKSPACE_LAUNCH_TIMEOUT_MS` (default 180 s) with nothing in the pane explaining why | *Claude failed to start* + the pane tail |
 
 Two rules keep this honest:

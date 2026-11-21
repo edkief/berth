@@ -222,8 +222,10 @@ fi
 
 # The pull is the only thing that can supply credentials, so an empty config
 # here means claude will start at a login prompt. Say so in the log rather than
-# leaving it to be discovered inside the terminal.
-if [ ! -s /home/ubuntu/.claude/.credentials.json ]; then
+# leaving it to be discovered inside the terminal. A credential in the
+# environment (API key, or a `claude setup-token` token) needs no file.
+if [ -z "${ANTHROPIC_API_KEY:-}${CLAUDE_CODE_OAUTH_TOKEN:-}" ] \
+    && [ ! -s /home/ubuntu/.claude/.credentials.json ]; then
     echo "[entrypoint] WARN: no ~/.claude/.credentials.json after sync; claude will not be logged in"
 fi
 
