@@ -10,7 +10,9 @@
  *
  *   GET /livez    the workspace is salvageable in place (see live())
  *   GET /healthz  readiness: bootstrap finished AND `claude remote` is running
- *                 (in editor mode: bootstrap finished AND code-server answers)
+ *                 (in editor mode: bootstrap finished AND code-server answers;
+ *                 in agent mode: bootstrap finished AND AGENT_RUNNER_HEALTH_URL
+ *                 answers 2xx)
  *   GET /disk     df of the workspace volume
  *   GET /session  what this pod is working on
  *
@@ -53,8 +55,12 @@ const SELF_HEAL = process.env.WORKSPACE_SELF_HEAL !== '0';
 const RELAUNCH_MAX = Number(process.env.WORKSPACE_RELAUNCH_MAX || 3);
 const RELAUNCH_BACKOFF_MS = Number(process.env.WORKSPACE_RELAUNCH_BACKOFF_MS || 30000);
 
-// Shared-login sync. See maintainToken().
-const TOKEN_SYNC = process.env.WORKSPACE_TOKEN_SYNC !== '0';
+// Shared-login sync. See maintainToken(). Off by default in an agent pod
+// (WORKSPACE_MODE=agent), which brings its own credential; entrypoint.sh
+// exports the same default, and this one holds for an agent started by hand.
+const TOKEN_SYNC = process.env.WORKSPACE_MODE === 'agent'
+    ? process.env.WORKSPACE_TOKEN_SYNC === '1'
+    : process.env.WORKSPACE_TOKEN_SYNC !== '0';
 const TOKEN_SYNC_MS = Number(process.env.WORKSPACE_TOKEN_SYNC_MS || 300000);
 // Floor for the forced sync an auth failure asks for, so a pod that cannot log
 // in spawns rclone every 30s rather than on every probe.
@@ -78,6 +84,19 @@ const EDITOR_MODE = process.env.WORKSPACE_MODE === 'editor';
 const CODE_PORT = Number(process.env.CODE_PORT || 7686);
 const CODE_PROBE_MS = Number(process.env.CODE_PROBE_MS || 3000);
 let codeServer = { up: false, reason: 'not checked yet', checkedAt: null };
+
+// An agent pod (WORKSPACE_MODE=agent) runs no bootstrap `claude remote`
+// either: supervisord runs a caller-supplied runner ([program:agent-runner]),
+// and readiness is its health URL answering 2xx, probed on a timer like
+// code-server's. Liveness fails only once a runner that was up has stayed down
+// for RUNNER_DOWN_MS -- long enough for supervisord's own restart of a crash
+// to land first, so only a runner that cannot come back costs a container.
+const AGENT_MODE = process.env.WORKSPACE_MODE === 'agent';
+const RUNNER_HEALTH_URL = process.env.AGENT_RUNNER_HEALTH_URL || '';
+const RUNNER_PROBE_MS = Number(process.env.AGENT_RUNNER_PROBE_MS || 3000);
+const RUNNER_DOWN_MS = Number(process.env.AGENT_RUNNER_DOWN_MS || 120000);
+let runner = { up: false, reason: 'not checked yet', checkedAt: null };
+let runnerDownSince = null; // first probe that saw the runner down after ready
 
 // Ralph's daemon runs headless under supervisord (`[program:ralph]`), which
 // does not autostart it: the agent starts it once per container when the
@@ -407,6 +426,11 @@ function health() {
         if (h.ready && !wasReadyOnce()) markReady();
         return h;
     }
+    if (AGENT_MODE) {
+        const h = runnerHealth(stage, runner, readFile(ERROR_FILE), wasReadyOnce());
+        if (h.ready && !wasReadyOnce()) markReady();
+        return h;
+    }
     const terminalReady = ttydRunning();
 
     if (stage === 'failed') {
@@ -508,22 +532,82 @@ function editorHealth(stage, code, error) {
     return { ready: false, stage: 'starting-editor', detail: `code-server: ${code.reason}` };
 }
 
-/** Re-read whether code-server answers its own /healthz. */
-function probeCodeServer() {
+/**
+ * Agent-mode readiness: the runner's health URL, nothing about Claude -- the
+ * sessions are the runner's, and it reports on them itself. Pure, for the tests.
+ */
+function runnerHealth(stage, probe, error, readyOnce = false) {
+    if (stage === 'failed') {
+        return { ready: false, stage: 'failed', detail: tail(error || '') };
+    }
+    if (stage !== 'starting') return { ready: false, stage, detail: null };
+    if (probe.up) return { ready: true, stage: 'ready', detail: null };
+    // Up once, down now: a regression, which /livez times (runnerLive()).
+    return {
+        ready: false,
+        stage: readyOnce ? 'runner-down' : 'starting-runner',
+        detail: `agent runner: ${probe.reason}`,
+    };
+}
+
+/**
+ * Agent-mode liveness. Never fails before the pod was first ready (a slow
+ * clone or a runner still installing must not be shot), nor while the runner
+ * has been down for less than downMs. Pure, for the tests.
+ */
+function runnerLive({ selfHeal, readyOnce, up, downSince, now, downMs }) {
+    if (!selfHeal) return { ok: true, reason: 'self-heal disabled' };
+    if (!readyOnce) return { ok: true, reason: 'bootstrap in progress' };
+    if (up || downSince === null) return { ok: true };
+    const down = now - downSince;
+    if (down < downMs) {
+        return { ok: true, reason: `agent runner down for ${Math.round(down / 1000)}s` };
+    }
+    return {
+        ok: false,
+        reason: `agent runner down for ${Math.round(down / 1000)}s -- restarting container`,
+    };
+}
+
+/**
+ * GET a URL and report `{up, reason, checkedAt}`: up on any 2xx. The body is
+ * discarded; a probe never holds a socket past its 2 s timeout.
+ */
+function probeHttp(url, done, timeout = 2000) {
     const checkedAt = () => new Date().toISOString();
-    const req = http.get({ host: '127.0.0.1', port: CODE_PORT, path: '/healthz', timeout: 2000 }, (res) => {
+    let finished = false;
+    const finish = (result) => { if (!finished) { finished = true; done(result); } };
+    let target;
+    try { target = new URL(url); } catch {
+        return finish({ up: false, reason: `invalid URL ${JSON.stringify(url)}`, checkedAt: checkedAt() });
+    }
+    const client = target.protocol === 'https:' ? require('https') : http;
+    const req = client.get(target, { timeout }, (res) => {
         res.resume();
-        codeServer = res.statusCode === 200
+        const ok = res.statusCode >= 200 && res.statusCode < 300;
+        finish(ok
             ? { up: true, reason: null, checkedAt: checkedAt() }
-            : { up: false, reason: `answered ${res.statusCode}`, checkedAt: checkedAt() };
+            : { up: false, reason: `answered ${res.statusCode}`, checkedAt: checkedAt() });
     });
     req.on('timeout', () => req.destroy(new Error('timed out')));
-    req.on('error', (err) => {
-        codeServer = {
-            up: false,
-            reason: err.code === 'ECONNREFUSED' ? 'not running' : `no answer (${err.code || err.message})`,
-            checkedAt: checkedAt(),
-        };
+    req.on('error', (err) => finish({
+        up: false,
+        reason: err.code === 'ECONNREFUSED' ? 'not running' : `no answer (${err.code || err.message})`,
+        checkedAt: checkedAt(),
+    }));
+}
+
+/** Re-read whether code-server answers its own /healthz. */
+function probeCodeServer() {
+    probeHttp(`http://127.0.0.1:${CODE_PORT}/healthz`, (r) => { codeServer = r; });
+}
+
+/** Re-read the runner's health, and time how long it has been down since ready. */
+function probeRunner() {
+    probeHttp(RUNNER_HEALTH_URL, (r) => {
+        runner = r;
+        if (r.up || !wasReadyOnce()) runnerDownSince = null;
+        else if (runnerDownSince === null) runnerDownSince = Date.now();
     });
 }
 
@@ -539,6 +623,16 @@ function live() {
     // Nothing here for a restart to fix: supervisord restarts a crashed
     // code-server, and there is no claude to lose.
     if (EDITOR_MODE) return { ok: true, reason: 'editor mode' };
+    if (AGENT_MODE) {
+        return runnerLive({
+            selfHeal: SELF_HEAL,
+            readyOnce: wasReadyOnce(),
+            up: runner.up,
+            downSince: runnerDownSince,
+            now: Date.now(),
+            downMs: RUNNER_DOWN_MS,
+        });
+    }
     if (!SELF_HEAL) return { ok: true, reason: 'self-heal disabled' };
     if (!wasReadyOnce()) return { ok: true, reason: 'bootstrap in progress' };
     if (claudeRemoteRunning()) return { ok: true };
@@ -578,9 +672,10 @@ function session() {
         workspaceDir: readFile(DIR_FILE),
         branch: process.env.BRANCH || null,
         sessionName: process.env.CLAUDE_SESSION_NAME || null,
-        mode: EDITOR_MODE ? 'editor' : 'workspace',
+        mode: EDITOR_MODE ? 'editor' : AGENT_MODE ? 'agent' : 'workspace',
         stage: readFile(STAGE_FILE) || 'starting',
-        claudeConnected: EDITOR_MODE ? null : health().ready,
+        claudeConnected: EDITOR_MODE || AGENT_MODE ? null : health().ready,
+        ...(AGENT_MODE ? { runner } : {}),
         credentials: credentials(),
         tokenSync: lastTokenSync,
         ...withRalph({}),
@@ -810,6 +905,10 @@ if (require.main === module) {
         probeCodeServer();
         setInterval(probeCodeServer, CODE_PROBE_MS);
     }
+    if (AGENT_MODE) {
+        probeRunner();
+        setInterval(probeRunner, RUNNER_PROBE_MS);
+    }
     if (RALPH_ENABLED) {
         const probe = () => { probeRalph(); probeRalphDaemon(); };
         probe();
@@ -818,4 +917,7 @@ if (require.main === module) {
     }
 }
 
-module.exports = { extractClaudeUrl, envAuthenticated, ralphFromStatus, parseSupervisorStatus, editorHealth, startServer };
+module.exports = {
+    extractClaudeUrl, envAuthenticated, ralphFromStatus, parseSupervisorStatus,
+    editorHealth, runnerHealth, runnerLive, probeHttp, startServer,
+};
